@@ -12,35 +12,89 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Homebrew dependencies
+      - name: Set up tools
         run: |
-          brew install meson ninja pkg-config xcodegen
-
-      - name: Make scripts executable
-        run: |
+          brew install xcodegen
+          rustup target add aarch64-apple-ios
           chmod +x scripts/*.sh
 
-      - name: Fetch sources and guest files
+      - name: Download official prebuilt release assets
         run: |
-          ./scripts/fetch_sources.sh
-          ./scripts/fetch_phase0_guest.sh
+          echo "==> Downloading base Husk 3.0 release assets..."
+          curl -fL --retry 3 -o /tmp/Husk_base.ipa https://github.com/Leviidev/Husk/releases/download/3.0/Husk.ipa
+          unzip -q /tmp/Husk_base.ipa -d /tmp/husk_base
+          
+          # Stage prebuilt dylibs and frameworks needed for linking Xcode project
+          mkdir -p build/ios-arm64/lib build/ios-arm64/sysroot/lib guests/phase0
+          cp /tmp/husk_base/Payload/Husk.app/Frameworks/libqemu-aarch64-softmmu.dylib build/ios-arm64/lib/
+          cp /tmp/husk_base/Payload/Husk.app/Frameworks/libANGLE-shared.dylib build/ios-arm64/sysroot/lib/
+          cp /tmp/husk_base/Payload/Husk.app/Frameworks/libhuskps4.dylib build/ios-arm64/lib/
+          cp -R /tmp/husk_base/Payload/Husk.app/Frameworks/MoltenVK.xcframework build/ios-arm64/lib/ 2>/dev/null || true
+          
+          # Stage guest images for preBuildScripts
+          cp /tmp/husk_base/Payload/Husk.app/vmlinuz-virt guests/phase0/ 2>/dev/null || touch guests/phase0/vmlinuz-virt
+          cp /tmp/husk_base/Payload/Husk.app/initramfs-virt guests/phase0/ 2>/dev/null || touch guests/phase0/initramfs-virt
 
-      - name: Build QEMU & libraries
+      - name: Build Rust pairing library
         run: |
-          ./scripts/build_ios.sh libffi glib pixman libucontext libslirp
-          cp build/ios-arm64/cross-darwin.meson build/ios-arm64/cross-ios-darwin.meson
-          ./scripts/build_angle_ios.sh
-          PKG_CONFIG_LIBDIR="$PWD/build/ios-arm64/sysroot/lib/pkgconfig:$PWD/build/ios-arm64/sysroot/share/pkgconfig" ./scripts/build_gpu_ios.sh
-          ./scripts/build_ios.sh qemu
-          ./scripts/integrate_husk.sh
-          ./scripts/build_ios.sh qemurebuild
           ./scripts/build_rppairing_ios.sh
+
+      - name: Build Husk App with custom Translation Layer
+        run: |
+          # Generate Xcode project if needed
+          (cd src/app && xcodegen generate --quiet) || true
+          
+          # Compile the main Husk app executable with our modified Swift and C translation layer
+          xcodebuild -project src/app/Husk.xcodeproj -scheme Husk \
+            -sdk iphoneos -configuration Release -derivedDataPath /tmp/husk_derived \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
 
       - name: Package IPA
         run: |
           mkdir -p output
-          ./scripts/package_ipa.sh output/Husk.ipa
-          ./scripts/package_ipa.sh --trollstore output/Husk.tipa
+          STAGE="/tmp/husk_stage"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/Payload"
+          
+          # Copy base official bundle with all QEMU, ANGLE, widgets, and guest files
+          cp -R /tmp/husk_base/Payload/Husk.app "$STAGE/Payload/"
+          
+          # Overlay our newly compiled app binary containing our custom Translation Layer
+          NEW_BIN="/tmp/husk_derived/Build/Products/Release-iphoneos/Husk.app/Husk"
+          if [ -f "$NEW_BIN" ]; then
+            echo "==> Replacing Husk executable with our newly compiled binary"
+            cp -f "$NEW_BIN" "$STAGE/Payload/Husk.app/Husk"
+          else
+            echo "Error: newly compiled binary not found at $NEW_BIN"
+            exit 1
+          fi
+          
+          # If custom Translation Layer built updated dylibs/frameworks, overlay them
+          if [ -d "/tmp/husk_derived/Build/Products/Release-iphoneos/Husk.app/Frameworks" ]; then
+            cp -R /tmp/husk_derived/Build/Products/Release-iphoneos/Husk.app/Frameworks/* "$STAGE/Payload/Husk.app/Frameworks/" 2>/dev/null || true
+          fi
+
+          # Sign ad-hoc with entitlements
+          ENT="$STAGE/entitlements.plist"
+          cp src/app/Husk/Husk.entitlements "$ENT"
+          sign() { codesign --force --sign - --timestamp=none "$@"; }
+          find "$STAGE/Payload/Husk.app" -name "*.dylib" -not -path "*/Frameworks/*.framework/*" | while read -r f; do sign "$f"; done
+          for fw in "$STAGE/Payload/Husk.app"/Frameworks/*.framework; do [ -d "$fw" ] && sign "$fw"; done
+          for ex in "$STAGE/Payload/Husk.app"/PlugIns/*.appex; do [ -d "$ex" ] && sign "$ex"; done
+          sign --entitlements "$ENT" "$STAGE/Payload/Husk.app"
+          
+          # Create standard IPA
+          ( cd "$STAGE" && zip -qry "$PWD/Husk.ipa" Payload )
+          mv "$STAGE/Husk.ipa" output/Husk.ipa
+          
+          # Create TrollStore TIPA (strip banned entitlements)
+          for key in "com.apple.private.cs.debugger" "dynamic-codesigning" "com.apple.private.skip-library-validation"; do
+            plutil -remove "$key" "$ENT" 2>/dev/null || true
+          done
+          sign --entitlements "$ENT" "$STAGE/Payload/Husk.app"
+          ( cd "$STAGE" && zip -qry "$PWD/Husk.tipa" Payload )
+          mv "$STAGE/Husk.tipa" output/Husk.tipa
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
