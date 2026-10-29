@@ -1,0 +1,49 @@
+name: Build Husk IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Homebrew dependencies
+        run: |
+          brew install meson ninja pkg-config xcodegen
+
+      - name: Make scripts executable
+        run: |
+          chmod +x scripts/*.sh
+
+      - name: Fetch sources and guest files
+        run: |
+          ./scripts/fetch_sources.sh
+          ./scripts/fetch_phase0_guest.sh
+
+      - name: Build QEMU & libraries
+        run: |
+          ./scripts/build_ios.sh libffi glib pixman libucontext libslirp
+          cp build/ios-arm64/cross-darwin.meson build/ios-arm64/cross-ios-darwin.meson
+          ./scripts/build_angle_ios.sh
+          PKG_CONFIG_LIBDIR="$PWD/build/ios-arm64/sysroot/lib/pkgconfig:$PWD/build/ios-arm64/sysroot/share/pkgconfig" ./scripts/build_gpu_ios.sh
+          ./scripts/build_ios.sh qemu
+          ./scripts/integrate_husk.sh
+          ./scripts/build_ios.sh qemurebuild
+          ./scripts/build_rppairing_ios.sh
+
+      - name: Package IPA
+        run: |
+          mkdir -p output
+          ./scripts/package_ipa.sh output/Husk.ipa
+          ./scripts/package_ipa.sh --trollstore output/Husk.tipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Husk-IPA
+          path: output/*
