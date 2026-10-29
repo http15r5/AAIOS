@@ -1,4 +1,4 @@
-# Husk
+# AAIOS
 
 <p align="center">
   <a href="https://trendshift.io/repositories/233057?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-233057" target="_blank" rel="noopener noreferrer">
