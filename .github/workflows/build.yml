@@ -26,7 +26,6 @@ jobs:
       - name: Set up tools
         run: |
           brew install xcodegen
-          rustup target add aarch64-apple-ios
           chmod +x scripts/*.sh
 
       - name: Download official prebuilt release assets

@@ -67,13 +67,21 @@ angle_build () {
         CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
         WK_AVAILABILITY_OVERLAY_FLAGS="" WK_AVAILABILITY_OVERLAY_SWIFT_FLAGS="" \
         IPHONEOS_DEPLOYMENT_TARGET="15.5" \
-        OTHER_CFLAGS='$(inherited) -Wno-unguarded-availability-new' \
-        OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-unguarded-availability-new' \
+        GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+        OTHER_CFLAGS='$(inherited) -Wno-unguarded-availability-new -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis -Wno-error' \
+        OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-unguarded-availability-new -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis -Wno-error' \
         ${ldflags[@]+"${ldflags[@]}"} \
         > "$LOG" 2>&1 \
       || { echo "ANGLE build failed; last errors:" >&2
            grep -a "error:\|^ld: " "$LOG" | head -10 >&2; exit 1; }
 }
+
+# Fix Clang thread-safety attributes on std::mutex in WebKit's ANGLE
+if [ -f "src/common/SimpleMutex.h" ]; then
+    sed -i '' -E 's/__attribute__\(\((acquire|release)_capability[^)]*\)\)//g' src/common/SimpleMutex.h 2>/dev/null || true
+    sed -i '' -E 's/ANGLE_ACQUIRE\([^)]*\)//g' src/common/SimpleMutex.h 2>/dev/null || true
+    sed -i '' -E 's/ANGLE_RELEASE\([^)]*\)//g' src/common/SimpleMutex.h 2>/dev/null || true
+fi
 
 # Two passes, because of a name mismatch.
 #

@@ -14,6 +14,6 @@ idevice = { version = "=0.1.68", default-features = false, features = ["remote_p
 tokio = { version = "1", features = ["rt", "net", "sync", "macros", "time"] }
 
 [profile.release]
-opt-level = "s"
-lto = true
-codegen-units = 1
+opt-level = 1
+lto = false
+codegen-units = 16
