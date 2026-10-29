@@ -7,10 +7,21 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Select Xcode 16
+        run: |
+          for app in /Applications/Xcode_16*.app; do
+            if [ -d "$app" ]; then
+              echo "==> Selecting $app"
+              sudo xcode-select -s "$app"
+              break
+            fi
+          done
+          xcodebuild -version
 
       - name: Set up tools
         run: |
