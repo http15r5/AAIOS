@@ -116,12 +116,7 @@ targets:
           - "-framework"
           - "Security"
           # On-device pairing for Built-in StikJIT, built by scripts/build_rppairing_ios.sh.
-          - "-lhusk_rppairing"
     dependencies:
-      # Built-in StikJIT's debugger process. Embedded into PlugIns/.
-      - target: HuskJITHelper
-      # The download Live Activity (Lock Screen and Dynamic Island). Embedded into PlugIns/.
-      - target: HuskDownloadsWidget
       # Built by scripts/build_ios.sh. Embedded and signed into the bundle.
       - framework: ../../build/ios-arm64/lib/libqemu-aarch64-softmmu.dylib
         embed: true
@@ -265,48 +260,3 @@ targets:
             codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" --timestamp=none "$DST"
           fi
         basedOnDependencyAnalysis: false
-
-  # Built-in StikJIT's debugger (docs/06-built-in-jit.md). A process cannot
-  # synchronously debug itself, so StikJIT runs here and attaches to the app.
-  # iOS 26 only: the app falls back to StikDebug below that.
-  HuskJITHelper:
-    type: app-extension
-    platform: iOS
-    deploymentTarget: "26.0"
-    sources:
-      - path: HuskJITHelper
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(HUSK_BUNDLE_IDENTIFIER).JITHelper
-        INFOPLIST_FILE: HuskJITHelper/Info.plist
-        GENERATE_INFOPLIST_FILE: NO
-        APPLICATION_EXTENSION_API_ONLY: YES
-        CODE_SIGN_STYLE: Automatic
-        TARGETED_DEVICE_FAMILY: "1,2"
-        # StikJIT.framework, in the app's Frameworks (the app target's Embed StikJIT).
-        LD_RUNPATH_SEARCH_PATHS:
-          - "$(inherited)"
-          - "@executable_path/../../Frameworks"
-    dependencies:
-      # StikJIT 1.9.0 (MPL-2.0, with idevice under MIT), from
-      # github.com/StikDebug/StikJIT/releases/tag/1.9.0, unmodified. Linked
-      # here and embedded by the app target's Embed StikJIT.
-      - framework: Frameworks/StikJIT.xcframework
-        embed: false
-
-  # Draws the Live Activity a download shows (Downloads.swift starts and updates it). Live Activities are iOS 16.1.
-  HuskDownloadsWidget:
-    type: app-extension
-    platform: iOS
-    deploymentTarget: "16.1"
-    sources:
-      - path: HuskDownloadsWidget
-      - path: Shared
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(HUSK_BUNDLE_IDENTIFIER).Downloads
-        INFOPLIST_FILE: HuskDownloadsWidget/Info.plist
-        GENERATE_INFOPLIST_FILE: NO
-        APPLICATION_EXTENSION_API_ONLY: YES
-        CODE_SIGN_STYLE: Automatic
-        TARGETED_DEVICE_FAMILY: "1"

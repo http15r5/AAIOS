@@ -15,11 +15,15 @@ cp -R /tmp/husk_base/Payload/Husk.app "$STAGE/Payload/"
 
 # Overlay our newly compiled app binary containing our custom Translation Layer
 NEW_BIN="/tmp/husk_derived/Build/Products/Release-iphoneos/Husk.app/Husk"
+if [ ! -f "$NEW_BIN" ]; then
+    NEW_BIN="/tmp/husk_derived/Build/Products/Release-iphoneos/Husk"
+fi
 if [ -f "$NEW_BIN" ]; then
-    echo "==> Replacing Husk executable with our newly compiled binary"
+    echo "==> Replacing Husk executable with our newly compiled binary ($NEW_BIN)"
     cp -f "$NEW_BIN" "$STAGE/Payload/Husk.app/Husk"
 else
-    echo "Error: newly compiled binary not found at $NEW_BIN"
+    echo "Error: newly compiled binary not found"
+    find /tmp/husk_derived/Build/Products -type f -name "Husk" || true
     exit 1
 fi
 

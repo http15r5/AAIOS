@@ -38,8 +38,8 @@ jobs:
 
       - name: Build Husk App with custom Translation Layer
         run: |
-          (cd src/app && xcodegen generate --quiet) || true
-          xcodebuild -project src/app/Husk.xcodeproj -scheme Husk \
+          (cd src/app && xcodegen generate)
+          xcodebuild -project src/app/Husk.xcodeproj -target Husk \
             -sdk iphoneos -configuration Release -derivedDataPath /tmp/husk_derived \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
