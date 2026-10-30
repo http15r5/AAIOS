@@ -4,6 +4,7 @@
 // under SwiftUI's names, so the views that use them need no change; the rest are modifiers and views with Husk's own names.
 import SwiftUI
 import UIKit
+import BackgroundTasks
 
 // MARK: - LabeledContent
 
@@ -342,4 +343,18 @@ struct HuskForm<Content: View>: View {
             Form { content }
         }
     }
+}
+
+// MARK: - iOS 26 Mock Tasks for SDK compatibility
+open class BGContinuedProcessingTask: BGTask {
+    public var progress: Progress = Progress()
+    open func updateTitle(_ title: String, subtitle: String) {}
+}
+
+open class BGContinuedProcessingTaskRequest: BGTaskRequest {
+    public init(identifier: String, title: String, subtitle: String) {
+        super.init(identifier: identifier)
+    }
+    public enum Strategy: Int { case fail }
+    public var strategy: Strategy = .fail
 }

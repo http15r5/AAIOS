@@ -405,14 +405,11 @@ struct InputSettings: View {
             } header: {
                 Text("Screen")
             } footer: {
-                Text(customRes
-                     ? "A custom resolution sets the shape itself, so this does nothing "
-                     + "while it is on. Type a wide size for landscape."
-                     : "Android cannot reshape a screen once it is running, so a "
-                     + "landscape game on a portrait screen gets letterboxed into a "
-                     + "band and looks tiny. Creating it landscape is the only way it "
-                     + "can fill it — portrait apps are letterboxed instead. Costs one "
-                     + "cold boot.")
+                if customRes {
+                    Text("A custom resolution sets the shape itself, so this does nothing while it is on. Type a wide size for landscape.")
+                } else {
+                    Text("Android cannot reshape a screen once it is running, so a landscape game on a portrait screen gets letterboxed into a band and looks tiny. Creating it landscape is the only way it can fill it — portrait apps are letterboxed instead. Costs one cold boot.")
+                }
             }
 
             Section {
@@ -420,9 +417,7 @@ struct InputSettings: View {
                     .onChange(of: customRes) { v in
                         UserDefaults.standard.set(v, forKey: "husk.customRes")
                         store()
-                        HuskLog.log("ui", v ? "custom resolution on: "
-                                            + "\(widthText)x\(heightText)"
-                                            : "custom resolution off")
+                        HuskLog.log("ui", v ? "custom resolution on: \(widthText)x\(heightText)" : "custom resolution off")
                     }
 
                 if customRes {
@@ -474,18 +469,11 @@ struct InputSettings: View {
             } header: {
                 Text("Resolution")
             } footer: {
-                Text("The panel is built when the machine starts, so a change costs "
-                   + "one cold boot, and the next save replaces the machine saved at "
-                   + "the old size — changing back costs another. Sizes are rounded "
-                   + "to a multiple of eight. Bigger is slower: every pixel is drawn "
-                   + "by an emulated phone. Android's density does not change with "
-                   + "the panel, so a larger one shows more rather than bigger.")
+                Text("The panel is built when the machine starts, so a change costs one cold boot, and the next save replaces the machine saved at the old size — changing back costs another. Sizes are rounded to a multiple of eight. Bigger is slower: every pixel is drawn by an emulated phone. Android's density does not change with the panel, so a larger one shows more rather than bigger.")
             }
 
             Section {
-                Text("Touch is always on. The keyboard and the rotate control are "
-                   + "in the pill at the bottom of the guest's screen; a gamepad "
-                   + "and a pointer are not wired through yet.")
+                Text("Touch is always on. The keyboard and the rotate control are in the pill at the bottom of the guest's screen; a gamepad and a pointer are not wired through yet.")
                     .font(.footnote).foregroundStyle(.secondary)
             } header: {
                 Text("Controls")
@@ -573,6 +561,65 @@ struct JITSettings: View {
         }
     }
 
+    private var experimentalSection: some View {
+        Section {
+            Toggle("JIT-less Mode", isOn: $jitless)
+            DetailRow(label: "Prebuilt games", value: JITLess.libraryCount > 0 ? "Geometry Dash" : "none in this build", mono: false)
+            if cacheBytes > 0 {
+                DetailRow(label: "Converted games", value: ByteCountFormatter.string(fromByteCount: cacheBytes, countStyle: .file), mono: false)
+                Button(role: .destructive) {
+                    JITLess.clearCache(); cacheBytes = JITLess.cacheBytes
+                } label: { Label("Remove Converted Games", systemImage: "trash") }
+            }
+        } header: {
+            Text("Experimental")
+        } footer: {
+            Text("Android games run without JIT: their code is converted once and signed with your developer certificate, so no debugger is needed. The first start of each game takes a few seconds longer. Geode mods and engines that make code while they run still need JIT. While this is on, Husk makes no executable memory, even when JIT is on.")
+        }
+        .onAppear { cacheBytes = JITLess.cacheBytes }
+    }
+
+    private var certificateSection: some View {
+        Section {
+            if let info = certificate.info {
+                DetailRow(label: "Team", value: info.teamID)
+                DetailRow(label: "Expires", value: info.expires.formatted(date: .abbreviated, time: .shortened), mono: false)
+                if info.expires < Date() {
+                    Text("This certificate has expired. Refresh Husk in your store, then import its certificate again.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            } else {
+                DetailRow(label: "Certificate", value: "not imported", mono: false)
+            }
+            ForEach(SigningCertificate.Store.allCases) { store in
+                Button {
+                    certificate.requestFromStore(store)
+                } label: { Label("Import from \(store.title)", systemImage: "arrow.down.circle") }
+            }
+            Button {
+                HuskFilePicker.present(types: [.pkcs12, .data], multiple: false, onPick: { urls in
+                    guard let url = urls.first else { return }
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    guard let data = try? Data(contentsOf: url) else { certificate.lastError = "That file could not be read."; return }
+                    p12Password = ""
+                    pickedP12 = data
+                }, onFail: { certificate.lastError = $0 })
+            } label: { Label("Import .p12 File", systemImage: "doc.badge.plus") }
+            if certificate.info != nil {
+                Button(role: .destructive) { certificate.remove() } label: { Label("Remove Certificate", systemImage: "trash") }
+            }
+            if let why = certificate.lastError {
+                Text(why).font(.caption).foregroundStyle(.orange)
+            }
+        } header: {
+            Text("Signing Certificate")
+        } footer: {
+            let teamDesc = SigningCertificate.installedTeamID.map { "(team \($0))" } ?? ""
+            Text("JIT-less mode signs converted games with the certificate your store installed Husk with \(teamDesc). SideStore and AltStore can hand it over; or import the .p12 file and its password. It stays in this device's Keychain. A free Apple ID's certificate changes every 7 days: import it again after refreshing Husk, and games are signed again on their next start.")
+        }
+    }
+
     var body: some View {
         HuskForm {
             Section {
@@ -581,64 +628,8 @@ struct JITSettings: View {
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
 
-            Section {
-                Toggle("JIT-less Mode", isOn: $jitless)
-                DetailRow(label: "Prebuilt games", value: JITLess.libraryCount > 0 ? "Geometry Dash" : "none in this build", mono: false)
-                if cacheBytes > 0 {
-                    DetailRow(label: "Converted games", value: ByteCountFormatter.string(fromByteCount: cacheBytes, countStyle: .file), mono: false)
-                    Button(role: .destructive) {
-                        JITLess.clearCache(); cacheBytes = JITLess.cacheBytes
-                    } label: { Label("Remove Converted Games", systemImage: "trash") }
-                }
-            } header: {
-                Text("Experimental")
-            } footer: {
-                Text("Android games run without JIT: their code is converted once and signed with your developer certificate, so no "
-                   + "debugger is needed. The first start of each game takes a few seconds longer. Geode mods and engines that "
-                   + "make code while they run still need JIT. While this is on, Husk makes no executable memory, even when JIT is on.")
-            }
-            .onAppear { cacheBytes = JITLess.cacheBytes }
-
-            Section {
-                if let info = certificate.info {
-                    DetailRow(label: "Team", value: info.teamID)
-                    DetailRow(label: "Expires", value: info.expires.formatted(date: .abbreviated, time: .shortened), mono: false)
-                    if info.expires < Date() {
-                        Text("This certificate has expired. Refresh Husk in your store, then import its certificate again.")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                } else {
-                    DetailRow(label: "Certificate", value: "not imported", mono: false)
-                }
-                ForEach(SigningCertificate.Store.allCases) { store in
-                    Button {
-                        certificate.requestFromStore(store)
-                    } label: { Label("Import from \(store.title)", systemImage: "arrow.down.circle") }
-                }
-                Button {
-                    HuskFilePicker.present(types: [.pkcs12, .data], multiple: false, onPick: { urls in
-                        guard let url = urls.first else { return }
-                        let scoped = url.startAccessingSecurityScopedResource()
-                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                        guard let data = try? Data(contentsOf: url) else { certificate.lastError = "That file could not be read."; return }
-                        p12Password = ""
-                        pickedP12 = data
-                    }, onFail: { certificate.lastError = $0 })
-                } label: { Label("Import .p12 File", systemImage: "doc.badge.plus") }
-                if certificate.info != nil {
-                    Button(role: .destructive) { certificate.remove() } label: { Label("Remove Certificate", systemImage: "trash") }
-                }
-                if let why = certificate.lastError {
-                    Text(why).font(.caption).foregroundStyle(.orange)
-                }
-            } header: {
-                Text("Signing Certificate")
-            } footer: {
-                Text("JIT-less mode signs converted games with the certificate your store installed Husk with "
-                   + "\(SigningCertificate.installedTeamID.map { "(team \($0))" } ?? ""). SideStore and AltStore can hand it over; "
-                   + "or import the .p12 file and its password. It stays in this device's Keychain. A free Apple ID's certificate "
-                   + "changes every 7 days: import it again after refreshing Husk, and games are signed again on their next start.")
-            }
+            experimentalSection
+            certificateSection
             .sheet(isPresented: Binding(get: { pickedP12 != nil }, set: { if !$0 { pickedP12 = nil } })) {
                 NavigationView {
                     Form {
