@@ -2704,3 +2704,12 @@ void tl_ld_aot_free(tl_ld_aot_image *img)
     free(img->page_class);
     img->region = NULL; img->text = NULL; img->page_class = NULL; img->page_count = 0;
 }
+
+/* JIT bridge fallback: Husk 3.0 base QEMU dylib only exports husk_ios_jit_prewarm */
+bool husk_ios_jit_prewarm(size_t bytes);
+
+bool husk_ios_jit_prewarm_self(size_t bytes)
+{
+    return husk_ios_jit_prewarm(bytes);
+}
+
