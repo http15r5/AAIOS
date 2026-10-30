@@ -32,13 +32,16 @@ if [ -d "/tmp/husk_derived/Build/Products/Release-iphoneos/Husk.app/Frameworks" 
     cp -R /tmp/husk_derived/Build/Products/Release-iphoneos/Husk.app/Frameworks/* "$STAGE/Payload/Husk.app/Frameworks/" 2>/dev/null || true
 fi
 
+# Remove PlugIns (app extensions like widgets/helpers) that free Apple accounts cannot sign,
+# which causes SideStore error 8220 (no devices to generate profile for extensions).
+rm -rf "$STAGE/Payload/Husk.app/PlugIns"
+
 # Sign ad-hoc with entitlements
 ENT="$STAGE/entitlements.plist"
 cp "$HUSK_ROOT/src/app/Husk/Husk.entitlements" "$ENT"
 sign() { codesign --force --sign - --timestamp=none "$@"; }
 find "$STAGE/Payload/Husk.app" -name "*.dylib" -not -path "*/Frameworks/*.framework/*" | while read -r f; do sign "$f"; done
 for fw in "$STAGE/Payload/Husk.app"/Frameworks/*.framework; do [ -d "$fw" ] && sign "$fw"; done
-for ex in "$STAGE/Payload/Husk.app"/PlugIns/*.appex; do [ -d "$ex" ] && sign "$ex"; done
 sign --entitlements "$ENT" "$STAGE/Payload/Husk.app"
 
 # Create standard IPA
