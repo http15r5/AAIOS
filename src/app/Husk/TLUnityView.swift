@@ -214,9 +214,9 @@ final class TLUnityUIView: UIView, UIKeyInput {
         guard bounds.width > 0, bounds.height > 0 else { return }
         let w = Int((bounds.width * contentScaleFactor).rounded())
         let h = Int((bounds.height * contentScaleFactor).rounded())
-        // An Unreal game draws with MoltenVK, which sizes this layer itself to the swapchain it made; sizing it back here on every layout would leave the layer and the
-        // swapchain disagreeing from then on.
-        if !(engine == .ue4 && launched) { (layer as? CAMetalLayer)?.drawableSize = CGSize(width: w, height: h) }
+        // Fixed-size engines (Minecraft, Unity, Cocos, SDL, etc.) are launched with an immutable resolution
+        // and ANGLE/EGL surface. Sizing the layer again after launch deforms the picture or cuts it in half.
+        if !launched || engine == .flutter { (layer as? CAMetalLayer)?.drawableSize = CGSize(width: w, height: h) }
         // Flutter lays itself out again at any size, as an Android view does when its window changes: a window being resized, the
         // screen turning.
         if engine == .flutter, launched { husk_flutter_resize(Int32(w), Int32(h)) }

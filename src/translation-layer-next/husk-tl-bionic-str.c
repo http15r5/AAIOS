@@ -340,22 +340,150 @@ static int b_rename(const char *a, const char *b)
     TL_ERRNO_BEGIN(); int r = rename(tl_path_resolve(a, x, sizeof(x)), tl_path_resolve(b, y, sizeof(y))); TL_ERRNO_END(); return r;
 }
 
+/* ----------------------------------------------------------- safe memory/string wrappers */
+
+static void *b_memcpy(void *d, const void *s, size_t n)
+{
+    if (!d || !s || !n) return d;
+    return memcpy(d, s, n);
+}
+
+static void *b_memmove(void *d, const void *s, size_t n)
+{
+    if (!d || !s || !n) return d;
+    return memmove(d, s, n);
+}
+
+static void *b_memset(void *d, int c, size_t n)
+{
+    if (!d || !n) return d;
+    return memset(d, c, n);
+}
+
+static void *b_memchr(const void *s, int c, size_t n)
+{
+    if (!s || !n) return NULL;
+    return memchr(s, c, n);
+}
+
+static int b_memcmp(const void *s1, const void *s2, size_t n)
+{
+    if (!n) return 0;
+    if (!s1 || !s2) return s1 ? 1 : (s2 ? -1 : 0);
+    return memcmp(s1, s2, n);
+}
+
+static size_t b_strlen(const char *s)
+{
+    if (!s) return 0;
+    return strlen(s);
+}
+
+static size_t b_strnlen(const char *s, size_t maxlen)
+{
+    if (!s) return 0;
+    return strnlen(s, maxlen);
+}
+
+static char *b_strcpy(char *d, const char *s)
+{
+    if (!d) return d;
+    if (!s) { *d = 0; return d; }
+    return strcpy(d, s);
+}
+
+static char *b_strncpy(char *d, const char *s, size_t n)
+{
+    if (!d || !n) return d;
+    if (!s) { memset(d, 0, n); return d; }
+    return strncpy(d, s, n);
+}
+
+static int b_strcmp(const char *s1, const char *s2)
+{
+    if (s1 == s2) return 0;
+    if (!s1) return -1;
+    if (!s2) return 1;
+    return strcmp(s1, s2);
+}
+
+static int b_strncmp(const char *s1, const char *s2, size_t n)
+{
+    if (!n || s1 == s2) return 0;
+    if (!s1) return -1;
+    if (!s2) return 1;
+    return strncmp(s1, s2, n);
+}
+
+static char *b_strchr(const char *s, int c)
+{
+    if (!s) return NULL;
+    return strchr(s, c);
+}
+
+static char *b_strrchr(const char *s, int c)
+{
+    if (!s) return NULL;
+    return strrchr(s, c);
+}
+
+static char *b_strstr(const char *haystack, const char *needle)
+{
+    if (!haystack || !needle) return NULL;
+    return strstr(haystack, needle);
+}
+
+static wchar_t *b_wmemcpy(wchar_t *d, const wchar_t *s, size_t n)
+{
+    if (!d || !s || !n) return d;
+    return wmemcpy(d, s, n);
+}
+
+static wchar_t *b_wmemmove(wchar_t *d, const wchar_t *s, size_t n)
+{
+    if (!d || !s || !n) return d;
+    return wmemmove(d, s, n);
+}
+
+static wchar_t *b_wmemset(wchar_t *d, wchar_t c, size_t n)
+{
+    if (!d || !n) return d;
+    return wmemset(d, c, n);
+}
+
+static wchar_t *b_wmemchr(const wchar_t *s, wchar_t c, size_t n)
+{
+    if (!s || !n) return NULL;
+    return (wchar_t *)wmemchr(s, c, n);
+}
+
+static int b_wmemcmp(const wchar_t *s1, const wchar_t *s2, size_t n)
+{
+    if (!n) return 0;
+    if (!s1 || !s2) return s1 ? 1 : (s2 ? -1 : 0);
+    return wmemcmp(s1, s2, n);
+}
+
 /* ----------------------------------------------------------- _chk variants */
 
 static void chk_fail(const char *what) { tl_log_line("bionic: %s: buffer overflow detected", what); abort(); }
-static void *b___memcpy_chk(void *d, const void *s, size_t n, size_t dl) { if (n > dl) chk_fail("__memcpy_chk"); return memcpy(d, s, n); }
-static void *b___memmove_chk(void *d, const void *s, size_t n, size_t dl) { if (n > dl) chk_fail("__memmove_chk"); return memmove(d, s, n); }
-static void *b___memset_chk(void *d, int c, size_t n, size_t dl) { if (n > dl) chk_fail("__memset_chk"); return memset(d, c, n); }
-static size_t b___strlen_chk(const char *s, size_t dl) { size_t n = strlen(s); if (n >= dl) chk_fail("__strlen_chk"); return n; }
-static char *b___strchr_chk(const char *s, int c, size_t dl) { char *r = strchr(s, c); if (r && (size_t)(r - s) >= dl) chk_fail("__strchr_chk"); return r; }
+static void *b___memcpy_chk(void *d, const void *s, size_t n, size_t dl) { if (!d || !s || !n) return d; if (n > dl) chk_fail("__memcpy_chk"); return memcpy(d, s, n); }
+static void *b___memmove_chk(void *d, const void *s, size_t n, size_t dl) { if (!d || !s || !n) return d; if (n > dl) chk_fail("__memmove_chk"); return memmove(d, s, n); }
+static void *b___memset_chk(void *d, int c, size_t n, size_t dl) { if (!d || !n) return d; if (n > dl) chk_fail("__memset_chk"); return memset(d, c, n); }
+static size_t b___strlen_chk(const char *s, size_t dl) { if (!s) return 0; size_t n = strlen(s); if (n >= dl) chk_fail("__strlen_chk"); return n; }
+static char *b___strchr_chk(const char *s, int c, size_t dl) { if (!s) return NULL; char *r = strchr(s, c); if (r && (size_t)(r - s) >= dl) chk_fail("__strchr_chk"); return r; }
 static char *b___strncat_chk(char *d, const char *s, size_t n, size_t dl)
 {
+    if (!d) return d;
+    if (!s || !n) return d;
     if (strlen(d) + (strnlen(s, n)) + 1 > dl) chk_fail("__strncat_chk");
     return strncat(d, s, n);
 }
 static char *b___strncpy_chk2(char *d, const char *s, size_t n, size_t dl, size_t sl)
 {
     (void)sl;
+    if (!d || !n) return d;
+    if (!s) { memset(d, 0, n); return d; }
     if (n > dl) chk_fail("__strncpy_chk2");
     return strncpy(d, s, n);
 }
@@ -677,12 +805,13 @@ static const char *g_sys_signame[32] = { "Unknown signal", "HUP", "INT", "QUIT",
 
 const tl_bionic_entry tl_tab_str[] = {
     /* string.h */
-    TL_DIRECT(memchr), TL_DIRECT(memcmp), TL_DIRECT(memcpy), TL_DIRECT(memmove), TL_DIRECT(memset),
+    TL_WRAP("memchr", b_memchr), TL_WRAP("memcmp", b_memcmp),
+    TL_WRAP("memcpy", b_memcpy), TL_WRAP("memmove", b_memmove), TL_WRAP("memset", b_memset),
     TL_WRAP("memrchr", b_memrchr), TL_DIRECT(strcasecmp), TL_DIRECT(strcasestr), TL_DIRECT(strcat),
-    TL_DIRECT(strchr), TL_DIRECT(strcmp), TL_DIRECT(strcoll), TL_DIRECT(strcoll_l), TL_DIRECT(strcpy),
-    TL_DIRECT(strcspn), TL_DIRECT(strdup), TL_DIRECT(strlcpy), TL_DIRECT(strlcat), TL_DIRECT(strlen), TL_DIRECT(strncmp),
-    TL_DIRECT(strncpy), TL_DIRECT(strnlen), TL_DIRECT(strpbrk), TL_DIRECT(strrchr), TL_DIRECT(strspn),
-    TL_DIRECT(strstr), TL_DIRECT(strtok_r), TL_DIRECT(strxfrm), TL_DIRECT(strxfrm_l),
+    TL_WRAP("strchr", b_strchr), TL_WRAP("strcmp", b_strcmp), TL_DIRECT(strcoll), TL_DIRECT(strcoll_l), TL_WRAP("strcpy", b_strcpy),
+    TL_DIRECT(strcspn), TL_DIRECT(strdup), TL_DIRECT(strlcpy), TL_DIRECT(strlcat), TL_WRAP("strlen", b_strlen), TL_WRAP("strncmp", b_strncmp),
+    TL_WRAP("strncpy", b_strncpy), TL_WRAP("strnlen", b_strnlen), TL_DIRECT(strpbrk), TL_WRAP("strrchr", b_strrchr), TL_DIRECT(strspn),
+    TL_WRAP("strstr", b_strstr), TL_DIRECT(strtok_r), TL_DIRECT(strxfrm), TL_DIRECT(strxfrm_l),
     TL_WRAP("strerror", b_strerror), TL_WRAP("strerror_r", b_strerror_r), TL_WRAP("strsignal", b_strsignal),
     TL_WRAP("basename", b_basename),
     TL_WRAP("__memcpy_chk", b___memcpy_chk), TL_WRAP("__memmove_chk", b___memmove_chk), TL_WRAP("__memset_chk", b___memset_chk),
@@ -706,7 +835,9 @@ const tl_bionic_entry tl_tab_str[] = {
     TL_WRAP("btowc", b_btowc), TL_WRAP("wctob", b_wctob),
     TL_DIRECT(wcschr), TL_DIRECT(wcsrchr), TL_DIRECT(wcscpy), TL_DIRECT(wcsncpy), TL_DIRECT(wcscat), TL_DIRECT(wcsncat), TL_DIRECT(wcscmp), TL_DIRECT(wcsncmp),
     TL_DIRECT(wcsstr), TL_DIRECT(wcsspn), TL_DIRECT(wcscspn), TL_DIRECT(wcspbrk), TL_DIRECT(wcsdup), TL_DIRECT(wcsnlen),
-    TL_DIRECT(wcslen), TL_DIRECT(wmemchr), TL_DIRECT(wmemcmp), TL_DIRECT(wmemcpy), TL_DIRECT(wmemmove), TL_DIRECT(wmemset),
+    TL_DIRECT(wcslen),
+    TL_WRAP("wmemchr", b_wmemchr), TL_WRAP("wmemcmp", b_wmemcmp),
+    TL_WRAP("wmemcpy", b_wmemcpy), TL_WRAP("wmemmove", b_wmemmove), TL_WRAP("wmemset", b_wmemset),
     TL_DIRECT(wcscoll), TL_DIRECT(wcscoll_l), TL_DIRECT(wcsxfrm), TL_DIRECT(wcsxfrm_l),
     TL_DIRECT(wcstod), TL_DIRECT(wcstof), TL_DIRECT(wcstol), TL_DIRECT(wcstoll), TL_DIRECT(wcstoul), TL_DIRECT(wcstoull),
     TL_WRAP("wcstold", b_wcstold),

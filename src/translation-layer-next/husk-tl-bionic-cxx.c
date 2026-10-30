@@ -90,12 +90,15 @@ static unsigned b_umask(unsigned m) { return (unsigned)umask((mode_t)m); }
 static unsigned b_alarm(unsigned s) { (void)s; return 0; }
 static int b_mlock(const void *a, size_t n) { (void)a; (void)n; return 0; }
 
-/* The guest's kill() on its own process would take the whole app down; that is the guest asking to quit. */
+/* The guest's kill() on its own process would take the whole app down; only fatal signals quit. */
 static int b_kill(int pid, int sig)
 {
-    if (pid == getpid() && sig != 0) {
+    if (pid == getpid()) {
+        if (sig == 0) return 0;
         tl_log_line("cxx: the game raised signal %d on its own process", sig);
-        if (tl_guest_exit_hook) tl_guest_exit_hook(128 + sig);
+        if (sig == 9 /* SIGKILL */ || sig == 15 /* SIGTERM */ || sig == 6 /* SIGABRT */ || sig == 3 /* SIGQUIT */) {
+            if (tl_guest_exit_hook) tl_guest_exit_hook(128 + sig);
+        }
         return 0;
     }
     int ds = sig == 0 ? 0 : tl_signal_to_darwin(sig);
