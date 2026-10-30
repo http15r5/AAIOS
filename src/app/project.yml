@@ -34,6 +34,8 @@ targets:
       - path: Husk
         excludes:
           - "Resources/**"
+          - "Assets.xcassets"
+          - "Assets.xcassets/**"
       # NOT `type: folder`: a folder reference copies the directory itself into the
       # bundle, and Bundle.path(forResource:ofType:) does not search subdirectories,
       # so the script would be present but unfindable at runtime.
@@ -58,14 +60,7 @@ targets:
         # Set your team here rather than in Xcode's UI: this file is the source of
         # truth, and `xcodegen generate` overwrites Husk.xcodeproj.
         # DEVELOPMENT_TEAM: XXXXXXXXXX
-        # The icon lives in Assets.xcassets/AppIcon.appiconset. Without this
-        # the catalog is compiled and the icon is never referenced.
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        # Alternates, so the icon can be chosen in Settings. iOS can only switch
-        # between NAMED icons, which is why each appearance variant is its own
-        # appiconset rather than appearances inside one.
-        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: AppIconClearLight AppIconClearDark AppIconTintedLight AppIconTintedDark
-        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
+        ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: Husk/Info.plist
         CODE_SIGN_ENTITLEMENTS: "$(HUSK_ENTITLEMENTS)"
