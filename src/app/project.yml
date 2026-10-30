@@ -111,6 +111,7 @@ targets:
           - "-framework"
           - "Security"
           # On-device pairing for Built-in StikJIT, built by scripts/build_rppairing_ios.sh.
+          - "-lhusk_rppairing"
     dependencies:
       # Built by scripts/build_ios.sh. Embedded and signed into the bundle.
       - framework: ../../build/ios-arm64/lib/libqemu-aarch64-softmmu.dylib
