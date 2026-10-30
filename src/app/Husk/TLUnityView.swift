@@ -230,7 +230,12 @@ final class TLUnityUIView: UIView, UIKeyInput {
         }
         let waited = firstLayout.map { Date().timeIntervalSince($0) > 2 } ?? false
         let ready = (portrait ? h > w : w > h) || waited
-        if !launched, window != nil, ready { launch(width: w, height: h) }
+        if !launched, window != nil, ready {
+            let effW = portrait ? min(w, h) : max(w, h)
+            let effH = portrait ? max(w, h) : min(w, h)
+            (layer as? CAMetalLayer)?.drawableSize = CGSize(width: effW, height: effH)
+            launch(width: effW, height: effH)
+        }
     }
 
     private var firstLayout: Date?

@@ -775,8 +775,13 @@ struct TLClassicAttemptView: View {
         cleanLayout = loaded.cleanView
     }
 
-    /// These games draw a portrait picture (Flappy Bird's is 540 x 960), unless the game's settings say otherwise.
-    private var portrait: Bool { settings.orientation != .landscape }
+    private var portrait: Bool {
+        switch settings.orientation {
+        case .landscape: return false
+        case .portrait: return true
+        case .auto: return app.apks.first.map { husk_apk_orientation($0) != 0 } ?? true
+        }
+    }
 
     private func toggleInterface() {
         withAnimation(.easeInOut(duration: 0.15)) { uiHidden.toggle() }

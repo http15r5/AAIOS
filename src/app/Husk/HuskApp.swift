@@ -1,6 +1,25 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import SwiftUI
 
+extension UIViewController {
+    private static var swizzledOrientation = false
+
+    @MainActor static func enableOrientationOverride() {
+        guard !swizzledOrientation else { return }
+        swizzledOrientation = true
+        let originalSelector = #selector(getter: UIViewController.supportedInterfaceOrientations)
+        let swizzledSelector = #selector(UIViewController.husk_supportedInterfaceOrientations)
+        if let orig = class_getInstanceMethod(UIViewController.self, originalSelector),
+           let swiz = class_getInstanceMethod(UIViewController.self, swizzledSelector) {
+            method_exchangeImplementations(orig, swiz)
+        }
+    }
+
+    @objc func husk_supportedInterfaceOrientations() -> UIInterfaceOrientationMask {
+        return HuskOrientation.mask
+    }
+}
+
 /// Which way the app may turn. The app follows the device, except while a landscape game is on screen:
 /// Geometry Dash is a landscape game, and a fixed-size surface cannot follow a rotation.
 enum HuskOrientation {
@@ -16,13 +35,15 @@ enum HuskOrientation {
     /// a moment apart, for as long as `new` is still what is wanted.
     @MainActor static func set(_ new: UIInterfaceOrientationMask, attempt: Int = 0) {
         mask = new
+        UIViewController.enableOrientationOverride()
         guard #available(iOS 16, *) else {
             // iOS 15 asks the view controllers again when the device turns; nudge it to ask now
             UIViewController.attemptRotationToDeviceOrientation()
             return
         }
         for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
-            var vc = scene.keyWindow?.rootViewController
+            let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
+            var vc = window?.rootViewController
             while let v = vc { v.setNeedsUpdateOfSupportedInterfaceOrientations(); vc = v.presentedViewController }
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: new)) { error in
                 HuskLog.log("ui", "orientation change refused (attempt \(attempt + 1)): \(error.localizedDescription)")
@@ -41,6 +62,7 @@ final class HuskAppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UIViewController.enableOrientationOverride()
         // The download session reconnects to whatever was running before Husk was closed or relaunched in the background.
         _ = Downloads.shared
         return true

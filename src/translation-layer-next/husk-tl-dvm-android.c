@@ -1235,10 +1235,25 @@ bool tl_javaapp_start(const tl_javaapp_config *cfg)
     if (!tl_ld_add_apk(cfg->apk_path)) return false;
     if (!tl_dvm_add_apk(cfg->apk_path)) return false;
     { char lib[1100]; snprintf(lib, sizeof(lib), "%s/lib", A.data); mkdir(lib, 0755); tl_ld_apk_libs(stub_lib, lib); }
-    { pthread_attr_t rt; pthread_attr_init(&rt); pthread_attr_setstacksize(&rt, 64u << 20); pthread_create(&A.gl_thread, &rt, gl_main, NULL); }
-    pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 256u << 20);
+    {
+        pthread_attr_t rt; pthread_attr_init(&rt);
+        pthread_attr_setstacksize(&rt, 8u << 20);
+        if (pthread_create(&A.gl_thread, &rt, gl_main, NULL) != 0) {
+            pthread_attr_setstacksize(&rt, 2u << 20);
+            pthread_create(&A.gl_thread, &rt, gl_main, NULL);
+        }
+        pthread_attr_destroy(&rt);
+    }
+    pthread_attr_t at; pthread_attr_init(&at);
+    pthread_attr_setstacksize(&at, 16u << 20);
     pthread_t t;
-    return pthread_create(&t, &at, app_main, NULL) == 0;
+    int rc = pthread_create(&t, &at, app_main, NULL);
+    if (rc != 0) {
+        pthread_attr_setstacksize(&at, 4u << 20);
+        rc = pthread_create(&t, &at, app_main, NULL);
+    }
+    pthread_attr_destroy(&at);
+    return rc == 0;
 }
 
 void tl_javaapp_touch(int phase, int id, float x, float y)
