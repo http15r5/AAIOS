@@ -54,7 +54,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Husk-IPA
-          path: output/*
+          path: output/Husk.ipa
+
+      - name: Upload TIPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Husk-TIPA
+          path: output/Husk.tipa
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
