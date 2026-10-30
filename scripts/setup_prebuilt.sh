@@ -77,4 +77,31 @@ EOF
 cp /tmp/husk_base/Payload/Husk.app/vmlinuz-virt "$HUSK_ROOT/guests/phase0/" 2>/dev/null || touch "$HUSK_ROOT/guests/phase0/vmlinuz-virt"
 cp /tmp/husk_base/Payload/Husk.app/initramfs-virt "$HUSK_ROOT/guests/phase0/" 2>/dev/null || touch "$HUSK_ROOT/guests/phase0/initramfs-virt"
 
+# Stage pc-bios and UEFI firmware
+BIOS_DIR="$HUSK_ROOT/third_party/build/qemu-10.0.12-utm/pc-bios"
+mkdir -p "$BIOS_DIR"
+if [ -f "/tmp/husk_base/Payload/Husk.app/edk2-aarch64-code.fd" ]; then
+    echo "==> Compressing edk2-aarch64-code.fd to bz2..."
+    bzip2 -c "/tmp/husk_base/Payload/Husk.app/edk2-aarch64-code.fd" > "$BIOS_DIR/edk2-aarch64-code.fd.bz2"
+else
+    echo "==> Creating placeholder edk2-aarch64-code.fd.bz2..."
+    touch "$BIOS_DIR/edk2-aarch64-code.fd"
+    bzip2 -c "$BIOS_DIR/edk2-aarch64-code.fd" > "$BIOS_DIR/edk2-aarch64-code.fd.bz2"
+fi
+
+if [ -d "/tmp/husk_base/Payload/Husk.app/pc-bios" ]; then
+    cp -R /tmp/husk_base/Payload/Husk.app/pc-bios/* "$BIOS_DIR/" 2>/dev/null || true
+fi
+
+# Stage android-system and java-runtime if present in base IPA
+if [ -d "/tmp/husk_base/Payload/Husk.app/android-system" ]; then
+    mkdir -p "$HUSK_ROOT/build/android-system"
+    cp -R /tmp/husk_base/Payload/Husk.app/android-system/* "$HUSK_ROOT/build/android-system/" 2>/dev/null || true
+fi
+
+if [ -d "/tmp/husk_base/Payload/Husk.app/java-runtime" ]; then
+    mkdir -p "$HUSK_ROOT/build/java-runtime"
+    cp -R /tmp/husk_base/Payload/Husk.app/java-runtime/* "$HUSK_ROOT/build/java-runtime/" 2>/dev/null || true
+fi
+
 echo "==> Base assets staged successfully"

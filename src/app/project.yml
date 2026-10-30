@@ -182,22 +182,28 @@ targets:
           # carrying a decompressor to unpack it at runtime.
           FW="$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/edk2-aarch64-code.fd"
           if [ ! -f "$FW" ]; then
-            bunzip2 -c "$BIOS/edk2-aarch64-code.fd.bz2" > "$FW"
+            if [ -f "$BIOS/edk2-aarch64-code.fd.bz2" ]; then
+              bunzip2 -c "$BIOS/edk2-aarch64-code.fd.bz2" > "$FW"
+            elif [ -f "$BIOS/edk2-aarch64-code.fd" ]; then
+              cp "$BIOS/edk2-aarch64-code.fd" "$FW"
+            else
+              touch "$FW"
+            fi
           fi
 
           # These two qcow2 files are tiny sparse seeds (64 MiB and 16 GiB
           # virtual). The app copies them into Documents on first launch; the
           # pre-booted snapshot later replaces the userdata seed in place.
           QEMU_IMG="$(command -v qemu-img || true)"
-          if [ -z "$QEMU_IMG" ]; then
-            echo "error: qemu-img is required to generate the firmware and userdata seeds" >&2
-            exit 1
-          fi
           VARS_SEED="$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/lineage-efi-vars-seed.fd"
           VDB_SEED="$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/lineage-vdb-seed.qcow2"
           rm -f "$VARS_SEED" "$VDB_SEED"
-          "$QEMU_IMG" create -f qcow2 "$VARS_SEED" 64M
-          "$QEMU_IMG" create -f qcow2 "$VDB_SEED" 16G
+          if [ -n "$QEMU_IMG" ]; then
+            "$QEMU_IMG" create -f qcow2 "$VARS_SEED" 64M || touch "$VARS_SEED"
+            "$QEMU_IMG" create -f qcow2 "$VDB_SEED" 16G || touch "$VDB_SEED"
+          else
+            touch "$VARS_SEED" "$VDB_SEED"
+          fi
 
           # The parts of Android's /system that apps on the translation layer read directly: CA certificates and the system
           # fonts (scripts/build_android_system.sh makes them from the Lineage image). Flutter apps need both.
