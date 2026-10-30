@@ -36,6 +36,18 @@ fi
 # which causes SideStore error 8220 (no devices to generate profile for extensions).
 rm -rf "$STAGE/Payload/Husk.app/PlugIns"
 
+# Stamp Info.plist with git commit and set bundle identifier to com.aird.app
+# to reuse user's registered App ID in SideStore (prevents error 8220)
+COMMIT="$(git -C "$HUSK_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+git -C "$HUSK_ROOT" diff --quiet 2>/dev/null || COMMIT="$COMMIT-dirty"
+PLIST="$STAGE/Payload/Husk.app/Info.plist"
+if [ -f "$PLIST" ]; then
+    plutil -replace HuskBuildCommit -string "$COMMIT" "$PLIST"
+    plutil -replace HuskBuildDate -string "$(date -u '+%Y-%m-%d %H:%M UTC')" "$PLIST"
+    plutil -replace CFBundleIdentifier -string "com.aird.app" "$PLIST"
+    echo "==> Stamped Info.plist: commit $COMMIT, bundle ID com.aird.app"
+fi
+
 # Sign ad-hoc with entitlements
 ENT="$STAGE/entitlements.plist"
 cp "$HUSK_ROOT/src/app/Husk/Husk.entitlements" "$ENT"
