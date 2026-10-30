@@ -907,6 +907,8 @@ static int arg_words(const dvm_method *m)
 _Thread_local dvm_method *t_frames[8192];
 _Thread_local uint32_t t_pcs[8192];             /* each frame's pc at its last call out: the line a stack trace shows */
 _Thread_local int t_depth;
+_Thread_local bool t_overflowing;
+_Thread_local uintptr_t t_stack_low;
 
 /* The source line of a pc in a method, from its debug info; -1 without one. */
 int dvm_line_of(dvm_method *m, uint32_t pc)
@@ -988,18 +990,17 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
     t_depth++;
     /* past 8000 frames: StackOverflowError, which is made with calls of its own, so those get 200 frames more (a deeper one
        throwing again would recurse without end) */
-    static _Thread_local bool t_overflowing;
-    /* ...or when the thread's own stack is nearly used up (a native thread made with a small one calling into Java): each
-       interpreted call takes several KB of it, where ART's take a few hundred bytes */
-    static _Thread_local uintptr_t t_stack_low;
+    /* ...or when the thread's own stack is nearly used up: keep 64 KB for C */
     if (!t_stack_low) {
         pthread_t me = pthread_self();
-        uintptr_t top = (uintptr_t)pthread_get_stackaddr_np(me); size_t sz = pthread_get_stacksize_np(me);
-        t_stack_low = top - sz + (sz > (2u << 20) ? (512u << 10) : sz / 4);   /* what is kept back for C below the interpreter */
+        uintptr_t top = (uintptr_t)pthread_get_stackaddr_np(me);
+        size_t sz = pthread_get_stacksize_np(me);
+        size_t reserve = (sz > (1u << 20)) ? (64u << 10) : (32u << 10);
+        t_stack_low = top - sz + reserve;
     }
     uintptr_t sp = (uintptr_t)__builtin_frame_address(0);
-    /* the error is thrown with 128 KB still above that, which its own calls may use */
-    if (t_depth > (t_overflowing ? 8200 : 8000) || sp < t_stack_low + (t_overflowing ? 0 : (128u << 10))) {
+    /* the error is thrown with 32 KB still above t_stack_low, which its own calls may use */
+    if (t_depth > (t_overflowing ? 8200 : 8000) || sp < t_stack_low + (t_overflowing ? 0 : (32u << 10))) {
         t_depth--;
         if (t_overflowing) return false;
         t_overflowing = true;

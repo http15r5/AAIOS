@@ -76,7 +76,7 @@ static void b_cxa_guard_abort(volatile uint8_t *g)
 }
 
 /* Old-style stack protector: the guard value is a symbol, not a TLS slot. */
-static uint64_t g_stack_chk_guard = 0x5ab3c17e9d2f4a00ull;
+static uint64_t g_stack_chk_guard = 0xdeadbeefcafebabeull;
 
 /* ------------------------------------------------------------------ process calls */
 
