@@ -396,15 +396,19 @@ static tl_jfield *lookup_field(tl_jclass *cls, const char *name, const char *sig
 
 static jvalue *field_slot(jobj *o, tl_jfield *f)
 {
+    static __thread jvalue scratch;
+    scratch.j = 0;
+    if (!f) return &scratch;
     if (f->detached) return &f->dval;
-    if (f->is_static) return &f->cls->statics[f->index];
+    if (f->is_static) return (f->cls && f->cls->statics) ? &f->cls->statics[f->index] : &scratch;
+    if (!o) return &scratch;
     /* an interpreter object's slots are its own: never grown from here */
     if (tl_dvm) {
         /* count before array, as the interpreter's writers publish them (dvm_slots_for) */
         uint32_t n = __atomic_load_n(&o->nfields, __ATOMIC_ACQUIRE);
         jvalue *sl = __atomic_load_n(&o->fields, __ATOMIC_ACQUIRE);
         if (sl && f->index < n) return &sl[f->index];
-        if (o->cls && o->cls->dvm) { static __thread jvalue scratch; scratch.j = 0; return &scratch; }
+        if (o->cls && o->cls->dvm) { return &scratch; }
         jvalue *dvm_grow_slots(jobj *, uint32_t);
         return &dvm_grow_slots(o, f->index + 8)[f->index];
     }
@@ -419,8 +423,9 @@ static jvalue *field_slot(jobj *o, tl_jfield *f)
 
 void tl_jni_set_field(jobj *o, const char *name, const char *sig, jvalue v)
 {
+    if (!o || !o->cls) return;
     tl_jfield *f = lookup_field(o->cls, name, sig, false, true);
-    *field_slot(o, f) = v;
+    if (f) *field_slot(o, f) = v;
 }
 /* A static field, set from C: what an activity's Java would have assigned before the game's code reads it. */
 void tl_jni_set_static_field(const char *cls, const char *name, const char *sig, jvalue v)
@@ -431,8 +436,9 @@ void tl_jni_set_static_field(const char *cls, const char *name, const char *sig,
 
 jvalue tl_jni_get_field(jobj *o, const char *name, const char *sig)
 {
+    if (!o || !o->cls) { jvalue z = {0}; return z; }
     tl_jfield *f = lookup_field(o->cls, name, sig, false, true);
-    return *field_slot(o, f);
+    return f ? *field_slot(o, f) : (jvalue){0};
 }
 void tl_jni_set_static(const char *cls, const char *name, const char *sig, jvalue v)
 {

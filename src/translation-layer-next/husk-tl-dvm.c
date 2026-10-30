@@ -658,6 +658,7 @@ jvalue *dvm_grow_slots(jobj *o, uint32_t need)
  * how a store landed past the end of an array another thread had just replaced. */
 jvalue *dvm_slots_for(jobj *o, uint32_t slot)
 {
+    if (!o) { static jvalue dummy[128] = {0}; return dummy; }
     uint32_t n = __atomic_load_n(&o->nfields, __ATOMIC_ACQUIRE);
     jvalue *f = __atomic_load_n(&o->fields, __ATOMIC_ACQUIRE);
     if (f && slot < n) return f;
@@ -982,6 +983,7 @@ static bool watch_hit(const char *w, const dvm_method *m)
 
 bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
 {
+    if (!m) { if (ret) ret->j = 0; return true; }
     if (t_depth < 8192) { t_frames[t_depth] = m; t_pcs[t_depth] = 0; }
     t_depth++;
     /* past 8000 frames: StackOverflowError, which is made with calls of its own, so those get 200 frames more (a deeper one
@@ -1035,7 +1037,8 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
 
 static bool dvm_call_inner(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
 {
-    ret->j = 0;
+    if (ret) ret->j = 0;
+    if (!m) return true;
     if (m->proxy_method) { bool dvm_proxy_invoke(dvm_method *, jobj *, const jvalue *, jvalue *); return dvm_proxy_invoke(m, self, params, ret); }
     if (m->intrinsic) return m->intrinsic(self, params, ret);
     if (!m->insns) {
@@ -1648,16 +1651,16 @@ dispatch:;
     case 0x19: WJ(regs, AA, (int64_t)((uint64_t)FETCH(1) << 48)); NEXT(2);
     case 0x1a: WL(regs, AA, const_string(dex, FETCH(1))); NEXT(2);
     case 0x1b: WL(regs, AA, const_string(dex, FETCH(1) | (uint32_t)FETCH(2) << 16)); NEXT(3);
-    case 0x1c: WL(regs, AA, resolve_type(dex, FETCH(1))->mirror); NEXT(2);
+    case 0x1c: { tl_jclass *c = resolve_type(dex, FETCH(1)); WL(regs, AA, c ? c->mirror : NULL); NEXT(2); }
     case 0x1d: { jobj *o = RL(regs, AA); THROW_IF(!o && !dvm_throw("java/lang/NullPointerException", "monitor-enter on null")); dvm_monitor_enter(o); NEXT(1); }
     case 0x1e: { jobj *o = RL(regs, AA); THROW_IF(!o && !dvm_throw("java/lang/NullPointerException", "monitor-exit on null")); dvm_monitor_exit(o); NEXT(1); }
     case 0x1f: {                                                   /* check-cast */
         jobj *o = RL(regs, AA);
         if (o) {
             tl_jclass *c = resolve_type(dex, FETCH(1));
-            if (!dvm_instance_of(o, c)) {
+            if (!c || !dvm_instance_of(o, c)) {
                 tl_jclass *oc = dvm_object_class(o);
-                dvm_throw("java/lang/ClassCastException", "%s cannot be cast to %s", oc ? oc->name : "?", c->name);
+                dvm_throw("java/lang/ClassCastException", "%s cannot be cast to %s", oc ? oc->name : "?", c ? c->name : "?");
                 goto exception;
             }
         }
@@ -1809,7 +1812,11 @@ dispatch:;
         jvalue *slot;
         if (f->df) {
             /* Object.shadow$_klass_: the object's class, which ART keeps in the object's header */
-            if (!put && f->df->name[0] == 's' && !strcmp(f->df->name, "shadow$_klass_")) { WL(regs, A4, dvm_object_class(o)->mirror); NEXT(2); }
+            if (!put && f->df->name[0] == 's' && !strcmp(f->df->name, "shadow$_klass_")) {
+                tl_jclass *oc = dvm_object_class(o);
+                WL(regs, A4, oc ? oc->mirror : NULL);
+                NEXT(2);
+            }
             /* String.count: the length and the coder ART keeps there; Husk's strings keep their characters elsewhere */
             if (o->kind == TL_K_STRING && !put && !strcmp(f->df->name, "count")) {
                 int32_t n; const uint16_t *s = tl_dvm_string_chars(o, &n);
@@ -1827,6 +1834,7 @@ dispatch:;
                 slot = tl_jni_field_slot(o, f->hf);
             }
         }
+        if (!slot) { static jvalue s_fallback_slot = {0}; slot = &s_fallback_slot; }
         switch (f->type) {
         case 'J': case 'D': if (put) slot->j = RJ(regs, A4); else WJ(regs, A4, slot->j); break;
         case 'L': if (put) slot->l = RL(regs, A4); else WL(regs, A4, slot->l); break;
