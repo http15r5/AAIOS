@@ -7,6 +7,7 @@
 #include "husk-tl-bionic.h"
 
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
@@ -295,8 +296,9 @@ static void *b_AAssetManager_fromJava(void *env, void *obj) { (void)env; (void)o
 static void *b_AAssetManager_open(void *mgr, const char *name, int mode)
 {
     (void)mgr; (void)mode;
-    char path[1024];
-    snprintf(path, sizeof(path), "assets/%s", name);
+    if (!name) return NULL;
+    while (*name == '/') name++;
+
     static int trace = -1;
     if (trace < 0) trace = getenv("TL_FILE_TRACE") != NULL;
     if (trace) tl_log_line("assets: open %s", name);
@@ -312,26 +314,47 @@ static void *b_AAssetManager_open(void *mgr, const char *name, int mode)
                 fclose(fp);
                 tl_asset *a = calloc(1, sizeof(*a));
                 a->data = buf; a->len = (size_t)n; a->owned = buf;
+                snprintf(a->name, sizeof(a->name), "%s", name);
                 return a;
             }
             free(buf); fclose(fp);
         }
     }
+
+    char p1[1024], p2[1024], p3[1024];
+    const char *cands[3];
+    int ncands = 0;
+    if (strncmp(name, "assets/", 7) == 0) {
+        snprintf(p1, sizeof(p1), "%s", name);
+        snprintf(p2, sizeof(p2), "assets/%s", name);
+        cands[ncands++] = p1;
+        cands[ncands++] = p2;
+    } else {
+        snprintf(p1, sizeof(p1), "assets/%s", name);
+        snprintf(p2, sizeof(p2), "assets/assets/%s", name);
+        snprintf(p3, sizeof(p3), "%s", name);
+        cands[ncands++] = p1;
+        cands[ncands++] = p2;
+        cands[ncands++] = p3;
+    }
+
     for (int i = 0;; i++) {
         const tl_zip *z = tl_ld_apk_at(i);
         if (!z) break;
-        const tl_zip_entry *e = tl_zip_find(z, path);
-        if (!e) continue;
-        const uint8_t *data; size_t n; bool owned; char err[160];
-        if (!tl_zip_data(z, e, (size_t)2 << 30, &data, &n, &owned, err, sizeof(err))) {
-            tl_log_line("assets: %s: %s", name, err);
-            return NULL;
+        for (int c = 0; c < ncands; c++) {
+            const tl_zip_entry *e = tl_zip_find(z, cands[c]);
+            if (!e) continue;
+            const uint8_t *data; size_t n; bool owned; char err[160];
+            if (!tl_zip_data(z, e, (size_t)2 << 30, &data, &n, &owned, err, sizeof(err))) {
+                tl_log_line("assets: %s: %s", name, err);
+                return NULL;
+            }
+            tl_asset *a = calloc(1, sizeof(*a));
+            a->data = data; a->len = n;
+            if (owned) a->owned = (uint8_t *)data;
+            snprintf(a->name, sizeof(a->name), "%s", cands[c]);
+            return a;
         }
-        tl_asset *a = calloc(1, sizeof(*a));
-        a->data = data; a->len = n;
-        if (owned) a->owned = (uint8_t *)data;
-        snprintf(a->name, sizeof(a->name), "%s", name);
-        return a;
     }
     return NULL;
 }
@@ -510,24 +533,104 @@ typedef struct { char **names; size_t n, pos; } tl_assetdir;
 static void *b_AAssetManager_openDir(void *mgr, const char *dir)
 {
     (void)mgr;
-    if (getenv("TL_FILE_TRACE")) tl_log_line("assets: openDir %s", dir);
-    char prefix[1024];
-    size_t pl = (size_t)snprintf(prefix, sizeof(prefix), "assets/%s%s", dir, dir[0] && dir[strlen(dir) - 1] != '/' ? "/" : "");
+    if (getenv("TL_FILE_TRACE")) tl_log_line("assets: openDir %s", dir ? dir : "");
+    const char *dpath = dir ? dir : "";
+    while (*dpath == '/') dpath++;
+    char clean_dir[1024];
+    size_t cd_len = strlen(dpath);
+    while (cd_len > 0 && dpath[cd_len - 1] == '/') cd_len--;
+    if (cd_len >= sizeof(clean_dir)) cd_len = sizeof(clean_dir) - 1;
+    memcpy(clean_dir, dpath, cd_len);
+    clean_dir[cd_len] = '\0';
+
+    char pref1[1024], pref2[1024], pref3[1024];
+    const char *prefixes[3];
+    int npref = 0;
+
+    if (clean_dir[0] == '\0') {
+        snprintf(pref1, sizeof(pref1), "assets/");
+        snprintf(pref2, sizeof(pref2), "assets/assets/");
+        prefixes[npref++] = pref1;
+        prefixes[npref++] = pref2;
+    } else if (strncmp(clean_dir, "assets/", 7) == 0) {
+        snprintf(pref1, sizeof(pref1), "%s/", clean_dir);
+        snprintf(pref2, sizeof(pref2), "assets/%s/", clean_dir);
+        prefixes[npref++] = pref1;
+        prefixes[npref++] = pref2;
+    } else {
+        snprintf(pref1, sizeof(pref1), "assets/%s/", clean_dir);
+        snprintf(pref2, sizeof(pref2), "assets/assets/%s/", clean_dir);
+        snprintf(pref3, sizeof(pref3), "%s/", clean_dir);
+        prefixes[npref++] = pref1;
+        prefixes[npref++] = pref2;
+        prefixes[npref++] = pref3;
+    }
+
     tl_assetdir *d = calloc(1, sizeof(*d));
     size_t cap = 0;
+
+    if (getenv("TL_ASSET_DIR")) {
+        char local_dir[1200];
+        if (clean_dir[0]) snprintf(local_dir, sizeof(local_dir), "%s/%s", getenv("TL_ASSET_DIR"), clean_dir);
+        else snprintf(local_dir, sizeof(local_dir), "%s", getenv("TL_ASSET_DIR"));
+        DIR *dp = opendir(local_dir);
+        if (dp) {
+            struct dirent *de;
+            while ((de = readdir(dp)) != NULL) {
+                if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+                bool exists = false;
+                for (size_t j = 0; j < d->n; j++) {
+                    if (strcmp(d->names[j], de->d_name) == 0) { exists = true; break; }
+                }
+                if (!exists) {
+                    if (d->n == cap) { cap = cap ? cap * 2 : 64; d->names = realloc(d->names, cap * sizeof(char *)); }
+                    d->names[d->n++] = strdup(de->d_name);
+                }
+            }
+            closedir(dp);
+        }
+    }
+
     for (int i = 0;; i++) {
         const tl_zip *z = tl_ld_apk_at(i);
         if (!z) break;
         for (size_t k = 0; k < z->count; k++) {
             const char *name = z->entries[k].name;
-            if (strncmp(name, prefix, pl) != 0 || !name[pl] || strchr(name + pl, '/')) continue;
-            if (d->n == cap) { cap = cap ? cap * 2 : 64; d->names = realloc(d->names, cap * sizeof(char *)); }
-            d->names[d->n++] = strdup(name + pl);
+            for (int p = 0; p < npref; p++) {
+                const char *pref = prefixes[p];
+                size_t pl = strlen(pref);
+                if (strncmp(name, pref, pl) != 0) continue;
+                const char *rest = name + pl;
+                if (!*rest) continue;
+                size_t seg = strcspn(rest, "/");
+                if (seg == 0) continue;
+                char child[400];
+                if (seg >= sizeof(child)) seg = sizeof(child) - 1;
+                memcpy(child, rest, seg);
+                child[seg] = '\0';
+
+                bool exists = false;
+                for (size_t j = 0; j < d->n; j++) {
+                    if (strcmp(d->names[j], child) == 0) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    if (d->n == cap) {
+                        cap = cap ? cap * 2 : 64;
+                        d->names = realloc(d->names, cap * sizeof(char *));
+                    }
+                    d->names[d->n++] = strdup(child);
+                }
+                break;
+            }
         }
     }
     return d;
 }
 static const char *b_AAssetDir_getNextFileName(tl_assetdir *d) { return d && d->pos < d->n ? d->names[d->pos++] : NULL; }
+static void b_AAssetDir_rewind(tl_assetdir *d) { if (d) d->pos = 0; }
 static void b_AAssetDir_close(tl_assetdir *d) { if (!d) return; for (size_t i = 0; i < d->n; i++) free(d->names[i]); free(d->names); free(d); }
 static unsigned long b_deflateBound(void *strm, unsigned long n) { (void)strm; return n + (n >> 12) + (n >> 14) + (n >> 25) + 13; }
 
@@ -958,7 +1061,7 @@ const tl_bionic_entry tl_tab_ndk[] = {
     TL_WRAP("AAudioStream_getHardwareChannelCount", b_AAudioStream_getHardwareChannelCount), TL_WRAP("AAudioStream_getHardwareSampleRate", b_AAudioStream_getHardwareSampleRate),
     TL_WRAP("AAudioStream_getHardwareFormat", b_AAudioStream_getHardwareFormat),
     TL_WRAP("AAssetManager_openDir", b_AAssetManager_openDir), TL_WRAP("AAssetDir_getNextFileName", b_AAssetDir_getNextFileName),
-    TL_WRAP("AAssetDir_close", b_AAssetDir_close), TL_WRAP("deflateBound", b_deflateBound),
+    TL_WRAP("AAssetDir_close", b_AAssetDir_close), TL_WRAP("AAssetDir_rewind", b_AAssetDir_rewind), TL_WRAP("deflateBound", b_deflateBound),
     TL_WRAP("AAssetManager_fromJava", b_AAssetManager_fromJava), TL_WRAP("AAssetManager_open", b_AAssetManager_open),
     TL_WRAP("AAsset_close", b_AAsset_close), TL_WRAP("AAsset_read", b_AAsset_read), TL_WRAP("AAsset_getLength", b_AAsset_getLength),
     TL_WRAP("AAsset_getLength64", b_AAsset_getLength), TL_WRAP("AAsset_getRemainingLength", b_AAsset_getRemainingLength),

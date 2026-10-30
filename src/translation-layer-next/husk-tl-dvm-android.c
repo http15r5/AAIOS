@@ -193,13 +193,31 @@ NAT(N_log)
 /* Assets: the app's APK first, then its splits and asset packs (a Play install keeps a game's data in an install-time asset pack). */
 static const tl_zip_entry *asset_find(const char *n, const tl_zip **zout)
 {
-    /* "/lib/x.so": a file from the APK's root (openNonAssetFd), which asset names never start with */
-    char path[1024]; if (n && n[0] == '/') snprintf(path, sizeof(path), "%s", n + 1); else snprintf(path, sizeof(path), "assets/%s", n ? n : "");
+    if (!n) return NULL;
+    while (*n == '/') n++;
+    char p1[1024], p2[1024], p3[1024];
+    const char *cands[3];
+    int ncands = 0;
+    if (strncmp(n, "assets/", 7) == 0) {
+        snprintf(p1, sizeof(p1), "%s", n);
+        snprintf(p2, sizeof(p2), "assets/%s", n);
+        cands[ncands++] = p1;
+        cands[ncands++] = p2;
+    } else {
+        snprintf(p1, sizeof(p1), "assets/%s", n);
+        snprintf(p2, sizeof(p2), "assets/assets/%s", n);
+        snprintf(p3, sizeof(p3), "%s", n);
+        cands[ncands++] = p1;
+        cands[ncands++] = p2;
+        cands[ncands++] = p3;
+    }
     for (int i = 0; i < 16; i++) {
         const tl_zip *z = tl_ld_apk_at(i);
         if (!z) { if (i == 0) continue; break; }
-        const tl_zip_entry *e = tl_zip_find(z, path);
-        if (e) { if (zout) *zout = z; return e; }
+        for (int c = 0; c < ncands; c++) {
+            const tl_zip_entry *e = tl_zip_find(z, cands[c]);
+            if (e) { if (zout) *zout = z; return e; }
+        }
     }
     return NULL;
 }
@@ -222,23 +240,59 @@ NAT(N_listAssets)
 {
     (void)self;
     const char *dir = tl_jni_string(a[0].l);
-    char prefix[1024]; snprintf(prefix, sizeof(prefix), "assets/%s%s", dir ? dir : "", dir && *dir ? "/" : "");
-    size_t pl = strlen(prefix);
+    const char *dpath = dir ? dir : "";
+    while (*dpath == '/') dpath++;
+    char clean_dir[1024];
+    size_t cd_len = strlen(dpath);
+    while (cd_len > 0 && dpath[cd_len - 1] == '/') cd_len--;
+    if (cd_len >= sizeof(clean_dir)) cd_len = sizeof(clean_dir) - 1;
+    memcpy(clean_dir, dpath, cd_len);
+    clean_dir[cd_len] = '\0';
+
+    char pref1[1024], pref2[1024], pref3[1024];
+    const char *prefixes[3];
+    int npref = 0;
+
+    if (clean_dir[0] == '\0') {
+        snprintf(pref1, sizeof(pref1), "assets/");
+        snprintf(pref2, sizeof(pref2), "assets/assets/");
+        prefixes[npref++] = pref1;
+        prefixes[npref++] = pref2;
+    } else if (strncmp(clean_dir, "assets/", 7) == 0) {
+        snprintf(pref1, sizeof(pref1), "%s/", clean_dir);
+        snprintf(pref2, sizeof(pref2), "assets/%s/", clean_dir);
+        prefixes[npref++] = pref1;
+        prefixes[npref++] = pref2;
+    } else {
+        snprintf(pref1, sizeof(pref1), "assets/%s/", clean_dir);
+        snprintf(pref2, sizeof(pref2), "assets/assets/%s/", clean_dir);
+        snprintf(pref3, sizeof(pref3), "%s/", clean_dir);
+        prefixes[npref++] = pref1;
+        prefixes[npref++] = pref2;
+        prefixes[npref++] = pref3;
+    }
+
     char **names = NULL; int n = 0, cap = 0;
     for (int zi = 0; zi < 16; zi++) {
         const tl_zip *z = tl_ld_apk_at(zi);
         if (!z) { if (zi == 0) continue; break; }
         for (size_t i = 0; i < z->count; i++) {
             const char *en = z->entries[i].name;
-            if (strncmp(en, prefix, pl)) continue;
-            const char *rest = en + pl;
-            if (!*rest) continue;
-            size_t l = strcspn(rest, "/");
-            bool dup = false;
-            for (int k = 0; k < n && !dup; k++) dup = strlen(names[k]) == l && !strncmp(names[k], rest, l);
-            if (dup) continue;
-            if (n == cap) { cap = cap ? cap * 2 : 32; names = realloc(names, (size_t)cap * sizeof(*names)); }
-            names[n++] = strndup(rest, l);
+            for (int p = 0; p < npref; p++) {
+                const char *prefix = prefixes[p];
+                size_t pl = strlen(prefix);
+                if (strncmp(en, prefix, pl)) continue;
+                const char *rest = en + pl;
+                if (!*rest) continue;
+                size_t l = strcspn(rest, "/");
+                if (l == 0) continue;
+                bool dup = false;
+                for (int k = 0; k < n && !dup; k++) dup = strlen(names[k]) == l && !strncmp(names[k], rest, l);
+                if (dup) continue;
+                if (n == cap) { cap = cap ? cap * 2 : 32; names = realloc(names, (size_t)cap * sizeof(*names)); }
+                names[n++] = strndup(rest, l);
+                break;
+            }
         }
     }
     jobj *arr = tl_jni_new_obj_array(tl_jni_class("java/lang/String"), (uint32_t)n);

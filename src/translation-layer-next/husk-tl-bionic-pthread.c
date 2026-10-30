@@ -456,7 +456,7 @@ static int b_create(pthread_t *out, const guest_attr *attr, void *(*fn)(void *),
     pthread_attr_init(&a);
     size_t stack = attr && attr->stack_size ? attr->stack_size : DEFAULT_STACK;
     if (stack < (1024u * 1024u)) stack = 1024u * 1024u;
-    if (stack > (2u << 20)) stack = 2u << 20;
+    if (stack > (8u << 20)) stack = 8u << 20;
     stack = (stack + 16383) & ~(size_t)16383;
     pthread_attr_setstacksize(&a, stack);
     if (attr && (attr->flags & GATTR_DETACHED)) pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
@@ -464,6 +464,10 @@ static int b_create(pthread_t *out, const guest_attr *attr, void *(*fn)(void *),
     c->fn = fn; c->arg = arg;
     pthread_t t;
     int r = pthread_create(&t, &a, start_thunk, c);
+    if (r && stack > 1024 * 1024) {
+        pthread_attr_setstacksize(&a, 1024 * 1024);
+        r = pthread_create(&t, &a, start_thunk, c);
+    }
     if (r) {
         /* Retry with 512 KB stack if resources are constrained */
         pthread_attr_setstacksize(&a, 512 * 1024);

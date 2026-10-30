@@ -66,15 +66,18 @@ NAT(Object_wait) { (void)ret; dvm_monitor_wait(self, a[0].j, a[1].i); return !tl
 
 NAT(String_charAt)
 {
-    int32_t n; const uint16_t *s = chars(self, &n);
-    if (a[0].i < 0 || a[0].i >= n) return dvm_throw("java/lang/StringIndexOutOfBoundsException", "index=%d length=%d", a[0].i, n);
+    if (!self) return npe("self");
+    int32_t n = 0; const uint16_t *s = chars(self, &n);
+    if (!s || a[0].i < 0 || a[0].i >= n) return dvm_throw("java/lang/StringIndexOutOfBoundsException", "index=%d length=%d", a[0].i, n);
     *ret = I(s[a[0].i]);
     return true;
 }
 NAT(String_compareTo)
 {
+    if (!self) return npe("compareTo(self)");
     if (!a[0].l) return npe("compareTo(null)");
-    int32_t n1, n2; const uint16_t *s1 = chars(self, &n1), *s2 = chars(a[0].l, &n2);
+    int32_t n1 = 0, n2 = 0; const uint16_t *s1 = chars(self, &n1), *s2 = chars(a[0].l, &n2);
+    if (!s1 || !s2) { *ret = I(n1 - n2); return true; }
     int32_t n = n1 < n2 ? n1 : n2;
     for (int32_t i = 0; i < n; i++) if (s1[i] != s2[i]) { *ret = I((int32_t)s1[i] - (int32_t)s2[i]); return true; }
     *ret = I(n1 - n2);
@@ -82,70 +85,101 @@ NAT(String_compareTo)
 }
 NAT(String_concat)
 {
+    if (!self) return npe("concat(self)");
     if (!a[0].l) return npe("concat(null)");
-    int32_t n1, n2; const uint16_t *s1 = chars(self, &n1), *s2 = chars(a[0].l, &n2);
+    int32_t n1 = 0, n2 = 0; const uint16_t *s1 = chars(self, &n1), *s2 = chars(a[0].l, &n2);
     if (!n2) { *ret = L(self); return true; }
+    if (!n1) { *ret = L(a[0].l); return true; }
     uint16_t *b = malloc((size_t)(n1 + n2) * 2);
-    memcpy(b, s1, (size_t)n1 * 2); memcpy(b + n1, s2, (size_t)n2 * 2);
+    if (!b) return dvm_throw("java/lang/OutOfMemoryError", "String.concat");
+    if (s1) memcpy(b, s1, (size_t)n1 * 2);
+    if (s2) memcpy(b + n1, s2, (size_t)n2 * 2);
     *ret = L(tl_dvm_string_u16(b, n1 + n2));
     free(b);
     return true;
 }
 NAT(String_doRepeat)
 {
-    int32_t n; const uint16_t *s = chars(self, &n);
+    if (!self) return npe("self");
+    int32_t n = 0; const uint16_t *s = chars(self, &n);
+    if (a[0].i < 0) return dvm_throw("java/lang/IllegalArgumentException", "count < 0");
+    if (!a[0].i) { *ret = L(tl_dvm_string_u16(NULL, 0)); return true; }
     int64_t total = (int64_t)n * a[0].i;
     uint16_t *b = malloc((size_t)(total ? total : 1) * 2);
-    for (int32_t i = 0; i < a[0].i; i++) memcpy(b + (int64_t)i * n, s, (size_t)n * 2);
+    if (!b) return dvm_throw("java/lang/OutOfMemoryError", "String.doRepeat");
+    if (s && n > 0) {
+        for (int32_t i = 0; i < a[0].i; i++) memcpy(b + (int64_t)i * n, s, (size_t)n * 2);
+    }
     *ret = L(tl_dvm_string_u16(b, (int32_t)total));
     free(b);
     return true;
 }
 NAT(String_doReplace)
 {
-    int32_t n; const uint16_t *s = chars(self, &n);
+    if (!self) return npe("self");
+    int32_t n = 0; const uint16_t *s = chars(self, &n);
     uint16_t *b = malloc((size_t)(n ? n : 1) * 2);
-    for (int32_t i = 0; i < n; i++) b[i] = s[i] == a[0].c ? a[1].c : s[i];
+    if (!b) return dvm_throw("java/lang/OutOfMemoryError", "String.doReplace");
+    if (s && n > 0) {
+        for (int32_t i = 0; i < n; i++) b[i] = s[i] == a[0].c ? a[1].c : s[i];
+    }
     *ret = L(tl_dvm_string_u16(b, n));
     free(b);
     return true;
 }
 NAT(String_fastSubstring)
 {
-    int32_t n; const uint16_t *s = chars(self, &n);
+    if (!self) return npe("self");
+    int32_t n = 0; const uint16_t *s = chars(self, &n);
     int32_t start = a[0].i, len = a[1].i;
     if (start < 0 || len < 0 || start + len > n) return dvm_throw("java/lang/StringIndexOutOfBoundsException", "substring");
-    *ret = L(tl_dvm_string_u16(s + start, len));
+    *ret = L(tl_dvm_string_u16(s ? s + start : (const uint16_t *)u"", len));
     return true;
 }
 NAT(String_fillBytesLatin1)
 {
     (void)ret;
-    int32_t n; const uint16_t *s = chars(self, &n);
+    if (!self) return npe("self");
+    int32_t n = 0; const uint16_t *s = chars(self, &n);
     jobj *b = a[0].l;
-    for (int32_t i = 0; i < n && a[1].i + i < (int32_t)b->arr.len; i++) ((uint8_t *)b->arr.data)[a[1].i + i] = (uint8_t)s[i];
+    if (!b) return npe("fillBytes dst");
+    if (b->kind != TL_K_PRIM_ARRAY || !b->arr.data) return true;
+    int32_t off = a[1].i;
+    if (!s || off < 0) return true;
+    for (int32_t i = 0; i < n && (uint32_t)(off + i) < b->arr.len; i++) ((uint8_t *)b->arr.data)[off + i] = (uint8_t)s[i];
     return true;
 }
 NAT(String_fillBytesUTF16)
 {
     (void)ret;
-    int32_t n; const uint16_t *s = chars(self, &n);
+    if (!self) return npe("self");
+    int32_t n = 0; const uint16_t *s = chars(self, &n);
     jobj *b = a[0].l;
+    if (!b) return npe("fillBytes dst");
+    if (b->kind != TL_K_PRIM_ARRAY || !b->arr.data) return true;
+    int32_t off = a[1].i;
+    if (!s || off < 0) return true;
     /* the index is in bytes (ART's FillBytesUTF16): the chars go there, two bytes each, little-endian */
-    for (int32_t i = 0; i < n && a[1].i + 2 * i + 1 < (int32_t)b->arr.len; i++) {
-        ((uint8_t *)b->arr.data)[a[1].i + 2 * i] = (uint8_t)(s[i] & 0xFF);
-        ((uint8_t *)b->arr.data)[a[1].i + 2 * i + 1] = (uint8_t)(s[i] >> 8);
+    for (int32_t i = 0; i < n && (uint32_t)(off + 2 * i + 1) < b->arr.len; i++) {
+        ((uint8_t *)b->arr.data)[off + 2 * i] = (uint8_t)(s[i] & 0xFF);
+        ((uint8_t *)b->arr.data)[off + 2 * i + 1] = (uint8_t)(s[i] >> 8);
     }
     return true;
 }
 NAT(String_getCharsNoCheck)
 {
     (void)ret;
-    int32_t n; const uint16_t *s = chars(self, &n);
+    if (!self) return npe("self");
+    int32_t n = 0; const uint16_t *s = chars(self, &n);
     jobj *dst = a[2].l;
     int32_t start = a[0].i, end = a[1].i, at = a[3].i;
-    if (!dst) return npe("getChars");
-    for (int32_t i = start; i < end && i < n; i++) ((uint16_t *)dst->arr.data)[at + i - start] = s[i];
+    if (!dst) return npe("getChars dst");
+    if (dst->kind != TL_K_PRIM_ARRAY || !dst->arr.data) return dvm_throw("java/lang/IllegalArgumentException", "dst not primitive array");
+    if (start < 0 || end < start || end > n) return dvm_throw("java/lang/StringIndexOutOfBoundsException", "start=%d end=%d len=%d", start, end, n);
+    if (at < 0 || (uint32_t)(at + (end - start)) > dst->arr.len) return dvm_throw("java/lang/ArrayIndexOutOfBoundsException", "dst len=%u at=%d count=%d", dst->arr.len, at, end - start);
+    if (s && dst->arr.data && end > start) {
+        memcpy((uint16_t *)dst->arr.data + at, s + start, (size_t)(end - start) * sizeof(uint16_t));
+    }
     return true;
 }
 static jobj **g_interned;                 /* open addressing, kept at most half full */
@@ -188,10 +222,11 @@ jobj *dvm_intern(jobj *s) { jvalue r; if (!s || !String_intern(s, NULL, &r) || !
 NAT(String_toCharArray)
 {
     (void)a;
-    int32_t n; const uint16_t *s = chars(self, &n);
+    if (!self) return npe("self");
+    int32_t n = 0; const uint16_t *s = chars(self, &n);
     jobj *arr = tl_jni_new_prim_array('C', (uint32_t)n);
     arr->refs = 1u << 30;
-    memcpy(arr->arr.data, s, (size_t)n * 2);
+    if (s && arr->arr.data && n > 0) memcpy(arr->arr.data, s, (size_t)n * 2);
     *ret = L(arr);
     return true;
 }
@@ -199,25 +234,32 @@ NAT(String_toCharArray)
 NAT(String_length) { (void)a; int32_t n; chars(self, &n); *ret = I(n); return true; }
 NAT(String_equals)
 {
+    if (!self || self->kind != TL_K_STRING) { *ret = Z(false); return true; }
     jobj *o = a[0].l;
     if (o == self) { *ret = Z(true); return true; }
     if (!o || o->kind != TL_K_STRING) { *ret = Z(false); return true; }
-    int32_t n1, n2; const uint16_t *s1 = chars(self, &n1), *s2 = chars(o, &n2);
+    int32_t n1 = 0, n2 = 0; const uint16_t *s1 = chars(self, &n1), *s2 = chars(o, &n2);
+    if (!s1 || !s2) { *ret = Z(s1 == s2 && n1 == n2); return true; }
     *ret = Z(n1 == n2 && !memcmp(s1, s2, (size_t)n1 * 2));
     return true;
 }
 NAT(String_hashCode)
 {
     (void)a;
-    int32_t n; const uint16_t *s = chars(self, &n);
+    if (!self) { *ret = I(0); return true; }
+    int32_t n = 0; const uint16_t *s = chars(self, &n);
+    if (!s || n <= 0) { *ret = I(0); return true; }
     uint32_t h = 0; for (int32_t i = 0; i < n; i++) h = h * 31 + s[i];
     *ret = I((int32_t)h);
     return true;
 }
 NAT(String_indexOfChar)
 {
-    int32_t n; const uint16_t *s = chars(self, &n);
+    if (!self) { *ret = I(-1); return true; }
+    int32_t n = 0; const uint16_t *s = chars(self, &n);
+    if (!s || n <= 0) { *ret = I(-1); return true; }
     int32_t c = a[0].i, from = a[1].i < 0 ? 0 : a[1].i;
+    if (from >= n) { *ret = I(-1); return true; }
     for (int32_t i = from; i < n; i++) {
         if (c < 0x10000 ? s[i] == c : (i + 1 < n && s[i] == (0xD800 | ((c - 0x10000) >> 10)) && s[i + 1] == (0xDC00 | ((c - 0x10000) & 0x3FF)))) { *ret = I(i); return true; }
     }
@@ -243,19 +285,40 @@ static jobj *from_utf8(const uint8_t *p, int32_t len)
     return s;
 }
 NAT(SF_fromBytes) { (void)self; if (!a[0].l) return npe("bytes"); *ret = L(from_bytes(a[0].l, a[2].i, a[3].i, a[1].i)); return true; }
-NAT(SF_fromChars) { (void)self; jobj *c = a[2].l; if (!c) return npe("chars"); *ret = L(tl_dvm_string_u16((uint16_t *)c->arr.data + a[0].i, a[1].i)); return true; }
-NAT(SF_fromString) { (void)self; int32_t n; const uint16_t *s = chars(a[0].l, &n); *ret = L(tl_dvm_string_u16(s, n)); return true; }
+NAT(SF_fromChars)
+{
+    (void)self;
+    jobj *c = a[2].l;
+    int32_t off = a[0].i, len = a[1].i;
+    if (!c) return npe("chars");
+    if (c->kind != TL_K_PRIM_ARRAY || !c->arr.data || off < 0 || len < 0 || (uint32_t)(off + len) > c->arr.len) return dvm_throw("java/lang/ArrayIndexOutOfBoundsException", "SF_fromChars");
+    *ret = L(tl_dvm_string_u16((uint16_t *)c->arr.data + off, len));
+    return true;
+}
+NAT(SF_fromString) { (void)self; int32_t n = 0; const uint16_t *s = chars(a[0].l, &n); *ret = L(tl_dvm_string_u16(s, n)); return true; }
 NAT(SF_fromUtf16Bytes)
 {
     (void)self;
     jobj *b = a[0].l; int32_t off = a[1].i, n = a[2].i;
+    if (!b) return npe("bytes");
+    if (b->kind != TL_K_PRIM_ARRAY || !b->arr.data || off < 0 || n < 0 || (uint32_t)(off + 2 * n) > b->arr.len) return dvm_throw("java/lang/ArrayIndexOutOfBoundsException", "SF_fromUtf16Bytes");
     uint16_t *u = malloc((size_t)(n ? n : 1) * 2);
+    if (!u) return dvm_throw("java/lang/OutOfMemoryError", "SF_fromUtf16Bytes");
     for (int32_t i = 0; i < n; i++) u[i] = (uint16_t)(((uint8_t *)b->arr.data)[off + 2 * i] | ((uint8_t *)b->arr.data)[off + 2 * i + 1] << 8);
     *ret = L(tl_dvm_string_u16(u, n));
     free(u);
     return true;
 }
-NAT(SF_fromUtf8Bytes) { (void)self; jobj *b = a[0].l; if (!b) return npe("bytes"); *ret = L(from_utf8((uint8_t *)b->arr.data + a[1].i, a[2].i)); return true; }
+NAT(SF_fromUtf8Bytes)
+{
+    (void)self;
+    jobj *b = a[0].l;
+    int32_t off = a[1].i, len = a[2].i;
+    if (!b) return npe("bytes");
+    if (b->kind != TL_K_PRIM_ARRAY || !b->arr.data || off < 0 || len < 0 || (uint32_t)(off + len) > b->arr.len) return dvm_throw("java/lang/ArrayIndexOutOfBoundsException", "SF_fromUtf8Bytes");
+    *ret = L(from_utf8((uint8_t *)b->arr.data + off, len));
+    return true;
+}
 
 /* String's constructors, as StringFactory's methods of the same parameters. Encoded bytes go through StringFactory's Java. */
 bool dvm_string_init(const char *sig, const jvalue *p, jvalue *ret)

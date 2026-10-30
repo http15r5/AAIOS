@@ -713,7 +713,33 @@ static int b_flock(int fd, int op) { TL_ERRNO_BEGIN(); int r = flock(fd, op); TL
     static rt b_##name(const char *p) { char b[1024]; TL_ERRNO_BEGIN(); rt r = call(tl_path_resolve(p, b, sizeof(b))); TL_ERRNO_END(); return r; }
 PATH1(int, unlink, unlink)
 PATH1(int, rmdir, rmdir)
-static int b_mkdir(const char *p, unsigned mode) { char b[1024]; TL_ERRNO_BEGIN(); int r = mkdir(tl_path_resolve(p, b, sizeof(b)), (mode_t)mode); TL_ERRNO_END(); return r; }
+static int mkdir_p(const char *path, mode_t mode)
+{
+    char tmp[1024];
+    size_t len = strlen(path);
+    if (len >= sizeof(tmp)) return -1;
+    memcpy(tmp, path, len + 1);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            mkdir(tmp, mode);
+            *p = '/';
+        }
+    }
+    return mkdir(tmp, mode);
+}
+static int b_mkdir(const char *p, unsigned mode)
+{
+    char b[1024];
+    const char *resolved = tl_path_resolve(p, b, sizeof(b));
+    TL_ERRNO_BEGIN();
+    int r = mkdir(resolved, (mode_t)mode);
+    if (r != 0 && errno == ENOENT) {
+        r = mkdir_p(resolved, (mode_t)mode);
+    }
+    TL_ERRNO_END();
+    return r;
+}
 /* FIFOs (Realm signals between its threads through one in its .realm.temp folder); other device nodes are refused, as for an app */
 static int b_mkfifo(const char *p, unsigned mode) { char b[1024]; TL_ERRNO_BEGIN(); int r = mkfifo(tl_path_resolve(p, b, sizeof(b)), (mode_t)(mode & 0777)); TL_ERRNO_END(); return r; }
 static int b_mknod(const char *p, unsigned mode, unsigned long dev)

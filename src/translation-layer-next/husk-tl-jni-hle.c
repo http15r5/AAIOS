@@ -738,19 +738,38 @@ typedef struct { const uint8_t *data; size_t len, pos; uint8_t *owned; } stream;
 
 static jobj *open_asset(const char *name)
 {
-    char path[1100]; snprintf(path, sizeof(path), "assets/%s", name);
+    if (!name) return NULL;
+    while (*name == '/') name++;
+    char p1[1100], p2[1100], p3[1100];
+    const char *cands[3];
+    int ncands = 0;
+    if (strncmp(name, "assets/", 7) == 0) {
+        snprintf(p1, sizeof(p1), "%s", name);
+        snprintf(p2, sizeof(p2), "assets/%s", name);
+        cands[ncands++] = p1;
+        cands[ncands++] = p2;
+    } else {
+        snprintf(p1, sizeof(p1), "assets/%s", name);
+        snprintf(p2, sizeof(p2), "assets/assets/%s", name);
+        snprintf(p3, sizeof(p3), "%s", name);
+        cands[ncands++] = p1;
+        cands[ncands++] = p2;
+        cands[ncands++] = p3;
+    }
     for (int i = 0;; i++) {
         const tl_zip *z = tl_ld_apk_at(i);
         if (!z) return NULL;
-        const tl_zip_entry *e = tl_zip_find(z, path);
-        if (!e) continue;
-        const uint8_t *d; size_t n; bool owned; char err[160];
-        if (!tl_zip_data(z, e, (size_t)1 << 30, &d, &n, &owned, err, sizeof(err))) return NULL;
-        jobj *s = make("java/io/ByteArrayInputStream");
-        stream *st = calloc(1, sizeof(*st));
-        st->data = d; st->len = n; if (owned) st->owned = (uint8_t *)d;
-        s->native = st;
-        return s;
+        for (int c = 0; c < ncands; c++) {
+            const tl_zip_entry *e = tl_zip_find(z, cands[c]);
+            if (!e) continue;
+            const uint8_t *d; size_t n; bool owned; char err[160];
+            if (!tl_zip_data(z, e, (size_t)1 << 30, &d, &n, &owned, err, sizeof(err))) return NULL;
+            jobj *s = make("java/io/ByteArrayInputStream");
+            stream *st = calloc(1, sizeof(*st));
+            st->data = d; st->len = n; if (owned) st->owned = (uint8_t *)d;
+            s->native = st;
+            return s;
+        }
     }
 }
 static void AM_open(tl_jcall *c)

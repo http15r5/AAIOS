@@ -36,18 +36,37 @@ typedef struct { const uint8_t *data; size_t len, pos; uint8_t *owned; } stream;
 /* The asset's place in the APK, if it is stored there uncompressed (so a file descriptor can read it in place). */
 bool tl_assetstream_stored(const char *name, int *fd, int64_t *off, int64_t *len)
 {
-    char path[600]; snprintf(path, sizeof(path), "assets/%s", name);
+    if (!name) return false;
+    while (*name == '/') name++;
+    char p1[1024], p2[1024], p3[1024];
+    const char *cands[3];
+    int ncands = 0;
+    if (strncmp(name, "assets/", 7) == 0) {
+        snprintf(p1, sizeof(p1), "%s", name);
+        snprintf(p2, sizeof(p2), "assets/%s", name);
+        cands[ncands++] = p1;
+        cands[ncands++] = p2;
+    } else {
+        snprintf(p1, sizeof(p1), "assets/%s", name);
+        snprintf(p2, sizeof(p2), "assets/assets/%s", name);
+        snprintf(p3, sizeof(p3), "%s", name);
+        cands[ncands++] = p1;
+        cands[ncands++] = p2;
+        cands[ncands++] = p3;
+    }
     for (int i = 0; ; i++) {
         const tl_zip *z = tl_ld_apk_at(i);
         if (!z) return false;
-        const tl_zip_entry *e = tl_zip_find(z, path);
-        if (!e) continue;
-        if (e->method != 0 || e->local_offset + 30 >= z->size) return false;
-        const uint8_t *h = z->map + e->local_offset;
-        uint16_t nlen, elen; memcpy(&nlen, h + 26, 2); memcpy(&elen, h + 28, 2);
-        *off = (int64_t)(e->local_offset + 30 + nlen + elen); *len = (int64_t)e->usize;
-        *fd = dup(z->fd);
-        return *fd >= 0;
+        for (int c = 0; c < ncands; c++) {
+            const tl_zip_entry *e = tl_zip_find(z, cands[c]);
+            if (!e) continue;
+            if (e->method != 0 || e->local_offset + 30 >= z->size) return false;
+            const uint8_t *h = z->map + e->local_offset;
+            uint16_t nlen, elen; memcpy(&nlen, h + 26, 2); memcpy(&elen, h + 28, 2);
+            *off = (int64_t)(e->local_offset + 30 + nlen + elen); *len = (int64_t)e->usize;
+            *fd = dup(z->fd);
+            return *fd >= 0;
+        }
     }
 }
 
