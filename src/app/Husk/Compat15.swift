@@ -351,7 +351,7 @@ open class BGContinuedProcessingTask: BGTask {
     open func updateTitle(_ title: String, subtitle: String) {}
 }
 
-open class BGContinuedProcessingTaskRequest: BGTaskRequest {
+open class BGContinuedProcessingTaskRequest: BGProcessingTaskRequest {
     public init(identifier: String, title: String, subtitle: String) {
         super.init(identifier: identifier)
     }
