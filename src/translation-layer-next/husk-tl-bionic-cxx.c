@@ -56,6 +56,18 @@ static void *b_new_nothrow(size_t n, const void *nt)
     void *p = malloc(sz);
     if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
     if (!p) p = calloc(1, sz);
+    if (!p) {
+        void *ptr = NULL;
+        if (posix_memalign(&ptr, 16, (sz + 15) & ~15ul) == 0) p = ptr;
+    }
+    if (!p) {
+        size_t psz = (sz + 16 + 0x3FFF) & ~0x3FFFull;
+        void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+        if (m != MAP_FAILED) {
+            *(size_t *)m = psz;
+            p = (void *)((uintptr_t)m + 16);
+        }
+    }
     return p;
 }
 static void *b_new_aligned(size_t n, size_t align)
@@ -72,7 +84,14 @@ static void *b_new_aligned(size_t n, size_t align)
 static void *b_new_aligned_nothrow(size_t n, size_t align, const void *nt)
 {
     (void)nt;
-    return b_new_aligned(n, align);
+    size_t sz = n ? n : 1;
+    if (align < sizeof(void *)) align = sizeof(void *);
+    void *p = NULL;
+    if (posix_memalign(&p, align, sz) == 0 && p) return p;
+    p = malloc(sz);
+    if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
+    if (!p) p = b_new_nothrow(sz, NULL);
+    return p;
 }
 static void b_delete(void *p)
 {
@@ -222,7 +241,20 @@ static void b___pthread_cleanup_pop(cleanup_rec *c, int execute) { t_cleanup = c
 /* bionic's struct mallinfo is ten size_t (80 bytes on arm64), returned by value -- through x8, as any struct over 16 bytes is, so
  * this must return the struct, not take a pointer. Darwin keeps no such numbers. */
 typedef struct { size_t arena, ordblks, smblks, hblks, hblkhd, usmblks, fsmblks, uordblks, fordblks, keepcost; } b_mallinfo_t;
-static b_mallinfo_t b_mallinfo(void) { b_mallinfo_t m; memset(&m, 0, sizeof(m)); return m; }
+static b_mallinfo_t b_mallinfo(void)
+{
+    b_mallinfo_t m;
+    memset(&m, 0, sizeof(m));
+    m.arena = 1024 * 1024 * 1024ul; /* 1 GiB virtual arena */
+    m.ordblks = 1024;
+    m.uordblks = 256 * 1024 * 1024ul; /* 256 MiB in use */
+    m.fordblks = 768 * 1024 * 1024ul; /* 768 MiB free space */
+    return m;
+}
+static b_mallinfo_t b_mallinfo2(void)
+{
+    return b_mallinfo();
+}
 static size_t b_malloc_usable_size(void *p) { return p ? malloc_size(p) : 0; }
 
 
@@ -232,7 +264,7 @@ const tl_bionic_entry tl_tab_cxx[] = {
     TL_WRAP("pthread_setschedparam", b_pthread_setschedparam), TL_WRAP("pthread_getschedparam", b_pthread_getschedparam),
     TL_WRAP("pthread_attr_setschedparam", b_pthread_attr_setschedparam), TL_WRAP("pthread_gettid_np", b_pthread_gettid_np),
     TL_WRAP("__pthread_cleanup_push", b___pthread_cleanup_push), TL_WRAP("__pthread_cleanup_pop", b___pthread_cleanup_pop),
-    TL_WRAP("mallinfo", b_mallinfo), TL_WRAP("malloc_usable_size", b_malloc_usable_size),
+    TL_WRAP("mallinfo", b_mallinfo), TL_WRAP("mallinfo2", b_mallinfo2), TL_WRAP("malloc_usable_size", b_malloc_usable_size),
     TL_WRAP("_Znwm", b_new), TL_WRAP("_Znam", b_new), TL_WRAP("_ZnwmRKSt9nothrow_t", b_new_nothrow), TL_WRAP("_ZnamRKSt9nothrow_t", b_new_nothrow),
     TL_WRAP("_ZnwmSt11align_val_t", b_new_aligned), TL_WRAP("_ZnamSt11align_val_t", b_new_aligned),
     TL_WRAP("_ZnwmSt11align_val_tRKSt9nothrow_t", b_new_aligned_nothrow), TL_WRAP("_ZnamSt11align_val_tRKSt9nothrow_t", b_new_aligned_nothrow),

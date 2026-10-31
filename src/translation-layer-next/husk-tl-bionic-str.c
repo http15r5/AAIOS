@@ -647,7 +647,15 @@ static void *b_memalign(size_t align, size_t size)
 {
     void *p = NULL;
     if (align < sizeof(void *)) align = sizeof(void *);
-    return posix_memalign(&p, align, size) ? NULL : p;
+    if ((align & (align - 1)) != 0) {
+        size_t a = sizeof(void *);
+        while (a < align) a <<= 1;
+        align = a;
+    }
+    if (posix_memalign(&p, align, size) == 0 && p) return p;
+    p = malloc(size);
+    if (!p) p = malloc_zone_malloc(malloc_default_zone(), size);
+    return p;
 }
 
 /* The floating-point environment: bionic's fenv_t is two words of its own layout, and nothing here turns on exceptions or rounding, so these report success. */

@@ -766,6 +766,10 @@ static void *thread_main(void *p)
 {
     void tl_thread_altstack(void); tl_thread_altstack();
     start_arg *s = p;
+    if (!s || !s->thread || (uintptr_t)s->thread < 0x100000ull) {
+        if (s) free(s);
+        return NULL;
+    }
     t_thread = s->thread;
     free(s);
     jobj *t = t_thread;
@@ -812,13 +816,25 @@ static void *thread_main(void *p)
 }
 NAT(Thread_nativeCreate)
 {
-    (void)self; (void)ret;
+    (void)ret;
+    jobj *th_obj = NULL;
+    size_t stack = 0;
+    if (self && (uintptr_t)self >= 0x100000ull) {
+        th_obj = self;
+        stack = a[0].j > 0 ? (size_t)a[0].j : 0;
+    } else if (a[0].l && (uintptr_t)a[0].l >= 0x100000ull) {
+        th_obj = a[0].l;
+        stack = a[1].j > 0 ? (size_t)a[1].j : 0;
+    }
+    if (!th_obj) return dvm_throw("java/lang/NullPointerException", "nativeCreate: null thread");
+
     start_arg *s = malloc(sizeof(*s));
-    s->thread = a[0].l;
-    dvm_field *pf = s->thread ? thread_peer(s->thread) : NULL;
-    if (pf) dvm_slots(s->thread)[pf->slot].j = (int64_t)(uintptr_t)s->thread;     /* alive from here (before it runs: start() then isAlive() is true) */
+    if (!s) return dvm_throw("java/lang/OutOfMemoryError", "nativeCreate");
+    s->thread = th_obj;
+    dvm_field *pf = thread_peer(th_obj);
+    if (pf) dvm_slots(th_obj)[pf->slot].j = (int64_t)(uintptr_t)th_obj;     /* alive from here (before it runs: start() then isAlive() is true) */
     pthread_attr_t at; pthread_attr_init(&at);
-    size_t stack = a[1].j > 0 ? (size_t)a[1].j : (4u << 20);
+    if (stack == 0) stack = (4u << 20);
     if (stack < (2u << 20)) stack = 2u << 20;
     if (stack > (8u << 20)) stack = 8u << 20;
     pthread_attr_setstacksize(&at, stack);
@@ -2005,6 +2021,9 @@ static const entry k_natives[] = {
     { "java/lang/UNIXProcess", "waitForProcessExit", "(I)I", UNIXProcess_waitForProcessExit },
     { "java/lang/UNIXProcess", "destroyProcess", "(I)V", UNIXProcess_destroyProcess },
     { "java/lang/Thread", "nativeCreate", "(Ljava/lang/Thread;JZ)V", Thread_nativeCreate },
+    { "java/lang/Thread", "nativeCreate", "(Ljava/lang/Thread;J)V", Thread_nativeCreate },
+    { "java/lang/Thread", "nativeCreate", "(JZ)V", Thread_nativeCreate },
+    { "java/lang/Thread", "nativeCreate", "(J)V", Thread_nativeCreate },
     { "java/lang/Thread", "nativeGetStatus", "(Z)I", Thread_status },
     { "java/lang/Thread", "nicenessForPriority", "(I)I", Thread_nice },
     { "java/lang/Thread", "setNativeName", "(Ljava/lang/String;)V", Thread_noop },

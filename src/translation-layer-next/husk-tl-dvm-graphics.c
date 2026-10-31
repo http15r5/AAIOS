@@ -662,31 +662,50 @@ static CGPathRef build_path(const float *f, int n)
 
 static CFStringRef cfstr(jobj *s, int start, int end)
 {
+    static const UniChar empty[] = { 0 };
     int32_t n = 0;
     const uint16_t *u = s ? tl_dvm_string_chars(s, &n) : NULL;
-    if (!u) return CFStringCreateWithCharacters(NULL, NULL, 0);
+    if (!u || n <= 0) return CFStringCreateWithCharacters(NULL, empty, 0);
     if (start < 0) start = 0;
     if (end > n || end < 0) end = n;
-    if (end < start) end = start;
-    return CFStringCreateWithCharacters(NULL, u + start, end - start);
+    if (end <= start) return CFStringCreateWithCharacters(NULL, empty, 0);
+    CFStringRef str = CFStringCreateWithCharacters(NULL, (const UniChar *)(u + start), end - start);
+    return str ? str : CFStringCreateWithCharacters(NULL, empty, 0);
 }
 
 static CTLineRef make_line(CFStringRef str, const int32_t *p, gface *g)
 {
+    static const UniChar empty[] = { ' ' };
+    CFStringRef safe_str = str;
+    bool own_str = false;
+    if (!safe_str) {
+        safe_str = CFStringCreateWithCharacters(NULL, empty, 0);
+        own_str = true;
+    }
     CTFontRef f = sized(g, pf(p, P_TEXTSIZE));
     float ls = pf(p, P_LSPACE) * pf(p, P_TEXTSIZE);
     CFNumberRef kern = CFNumberCreate(NULL, kCFNumberFloatType, &ls);
     const void *k[] = { kCTFontAttributeName, kCTForegroundColorFromContextAttributeName, kCTKernAttributeName };
     const void *v[] = { f, kCFBooleanTrue, kern };
     CFDictionaryRef attrs = CFDictionaryCreate(NULL, k, v, ls != 0 ? 3 : 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    CFAttributedStringRef as = CFAttributedStringCreate(NULL, str, attrs);
-    CTLineRef line = CTLineCreateWithAttributedString(as);
-    CFRelease(as); CFRelease(attrs); CFRelease(kern); CFRelease(f);
+    CFAttributedStringRef as = safe_str ? CFAttributedStringCreate(NULL, safe_str, attrs) : NULL;
+    CTLineRef line = as ? CTLineCreateWithAttributedString(as) : NULL;
+    if (as) CFRelease(as);
+    if (attrs) CFRelease(attrs);
+    if (kern) CFRelease(kern);
+    if (f) CFRelease(f);
+    if (own_str && safe_str) CFRelease(safe_str);
+    if (!line) {
+        CFAttributedStringRef fallback_as = CFAttributedStringCreate(NULL, CFSTR(" "), NULL);
+        line = fallback_as ? CTLineCreateWithAttributedString(fallback_as) : NULL;
+        if (fallback_as) CFRelease(fallback_as);
+    }
     return line;
 }
 
 static float line_width(CTLineRef line, const int32_t *p)
 {
+    if (!line) return 0.0f;
     return (float)CTLineGetTypographicBounds(line, NULL, NULL, NULL) * (pf(p, P_SCALEX) > 0 ? pf(p, P_SCALEX) : 1);
 }
 
@@ -694,7 +713,8 @@ static void draw_text(gcanvas *v, jobj *s, int start, int end, float x, float y,
 {
     CFStringRef str = cfstr(s, start, end);
     CTLineRef line = make_line(str, p, g);
-    CFRelease(str);
+    if (str) CFRelease(str);
+    if (!line) return;
     float w = line_width(line, p);
     if (p[P_ALIGN] == 1) x -= w / 2;
     else if (p[P_ALIGN] == 2) x -= w;
@@ -1192,7 +1212,8 @@ NAT(G_txMeasure)
     const int32_t *p = paint_of(a[3].l);
     CTLineRef line = make_line(s, p, (gface *)(uintptr_t)a[4].j);
     *ret = Ff(line_width(line, p));
-    CFRelease(line); CFRelease(s);
+    if (line) CFRelease(line);
+    if (s) CFRelease(s);
     return true;
 }
 /* (int[] paint, long typeface, float[] out: top ascent descent bottom leading) -> float spacing */
@@ -1223,7 +1244,7 @@ NAT(G_txBounds)
     CTLineRef line = make_line(s, p, (gface *)(uintptr_t)a[4].j);
     int32_t *o = arr_data(a[5].l);
     if (o) {
-        CGRect r = CTLineGetImageBounds(line, NULL);
+        CGRect r = line ? CTLineGetImageBounds(line, NULL) : CGRectZero;
         if (CGRectIsNull(r) || CGRectIsEmpty(r)) { o[0] = o[1] = o[2] = o[3] = 0; }
         else {
             float sx = pf(p, P_SCALEX) > 0 ? pf(p, P_SCALEX) : 1;
@@ -1231,7 +1252,8 @@ NAT(G_txBounds)
             o[1] = (int32_t)floor(-(r.origin.y + r.size.height)); o[3] = (int32_t)ceil(-r.origin.y);
         }
     }
-    CFRelease(line); CFRelease(s);
+    if (line) CFRelease(line);
+    if (s) CFRelease(s);
     return true;
 }
 /* (String, int start, int end, float maxWidth, int[] paint, long typeface, boolean words) -> chars that fit */
@@ -1243,13 +1265,20 @@ NAT(G_txBreak)
     CTFontRef f = sized((gface *)(uintptr_t)a[5].j, pf(p, P_TEXTSIZE));
     const void *k[] = { kCTFontAttributeName }; const void *v[] = { f };
     CFDictionaryRef attrs = CFDictionaryCreate(NULL, k, v, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    CFAttributedStringRef as = CFAttributedStringCreate(NULL, s, attrs);
-    CTTypesetterRef ts = CTTypesetterCreateWithAttributedString(as);
+    CFAttributedStringRef as = s ? CFAttributedStringCreate(NULL, s, attrs) : NULL;
+    CTTypesetterRef ts = as ? CTTypesetterCreateWithAttributedString(as) : NULL;
     float sx = pf(p, P_SCALEX) > 0 ? pf(p, P_SCALEX) : 1;
     double w = a[3].f / sx;
-    CFIndex n = a[6].z ? CTTypesetterSuggestLineBreak(ts, 0, w) : CTTypesetterSuggestClusterBreak(ts, 0, w);
+    CFIndex n = 0;
+    if (ts) {
+        n = a[6].z ? CTTypesetterSuggestLineBreak(ts, 0, w) : CTTypesetterSuggestClusterBreak(ts, 0, w);
+        CFRelease(ts);
+    }
     *ret = Ii((int32_t)n);
-    CFRelease(ts); CFRelease(as); CFRelease(attrs); CFRelease(s); CFRelease(f);
+    if (as) CFRelease(as);
+    if (attrs) CFRelease(attrs);
+    if (s) CFRelease(s);
+    if (f) CFRelease(f);
     return true;
 }
 /* (String, int start, int end, int[] paint, long typeface, float[] out) -> advances per UTF-16 unit */
@@ -1259,19 +1288,21 @@ NAT(G_txWidths)
     CFStringRef s = cfstr(a[0].l, a[1].i, a[2].i);
     const int32_t *p = paint_of(a[3].l);
     float *o = arr_data(a[5].l);
-    CFIndex n = CFStringGetLength(s);
-    if (o && (CFIndex)arr_len(a[5].l) >= n) {
+    CFIndex n = s ? CFStringGetLength(s) : 0;
+    if (o && (CFIndex)arr_len(a[5].l) >= n && n > 0) {
         CTLineRef line = make_line(s, p, (gface *)(uintptr_t)a[4].j);
-        float sx = pf(p, P_SCALEX) > 0 ? pf(p, P_SCALEX) : 1;
-        double prev = 0;
-        for (CFIndex i = 0; i < n; i++) {
-            double x = CTLineGetOffsetForStringIndex(line, i + 1, NULL);
-            o[i] = (float)((x - prev) * sx);
-            prev = x;
+        if (line) {
+            float sx = pf(p, P_SCALEX) > 0 ? pf(p, P_SCALEX) : 1;
+            double prev = 0;
+            for (CFIndex i = 0; i < n; i++) {
+                double x = CTLineGetOffsetForStringIndex(line, i + 1, NULL);
+                o[i] = (float)((x - prev) * sx);
+                prev = x;
+            }
+            CFRelease(line);
         }
-        CFRelease(line);
     }
-    CFRelease(s);
+    if (s) CFRelease(s);
     return true;
 }
 

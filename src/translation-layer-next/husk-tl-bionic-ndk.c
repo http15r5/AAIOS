@@ -713,6 +713,55 @@ static size_t b_ASharedMemory_getSize(int fd) { struct stat st; return fstat(fd,
 static int b_ASharedMemory_setProt(int fd, int prot) { (void)fd; (void)prot; return 0; }
 static int b_ASharedMemory_dupFromJava(void *env, void *obj) { (void)env; (void)obj; return -1; }
 
+/* ----------------------------------------------------------- AHardwareBuffer & ASurfaceControl */
+/* Android's hardware buffer API (API 26+) and SurfaceControl (API 29+).
+ * Husk runs on iOS without Android Gralloc/ION.
+ * AHardwareBuffer_isSupported returns 0, and AHardwareBuffer_allocate sets *outBuffer = NULL
+ * and returns -12 (-ENOMEM), which cleanly informs Flutter Impeller/Skia and other engines
+ * that hardware buffers are not available so they safely fall back to standard OpenGL ES textures.
+ */
+static int b_AHardwareBuffer_isSupported(const void *desc) { (void)desc; return 0; }
+static int b_AHardwareBuffer_allocate(const void *desc, void **outBuffer)
+{
+    (void)desc;
+    if (outBuffer) *outBuffer = NULL;
+    return -12; /* -ENOMEM */
+}
+static void b_AHardwareBuffer_acquire(void *buffer) { (void)buffer; }
+static void b_AHardwareBuffer_release(void *buffer) { (void)buffer; }
+static void b_AHardwareBuffer_describe(const void *buffer, void *outDesc) { (void)buffer; if (outDesc) memset(outDesc, 0, 40); }
+static int b_AHardwareBuffer_lock(void *buffer, uint64_t usage, int32_t fence, const void *rect, void **outVirtualAddress)
+{
+    (void)buffer; (void)usage; (void)fence; (void)rect;
+    if (outVirtualAddress) *outVirtualAddress = NULL;
+    return -12;
+}
+static int b_AHardwareBuffer_lockPlanes(void *buffer, uint64_t usage, int32_t fence, const void *rect, void *outPlanes)
+{
+    (void)buffer; (void)usage; (void)fence; (void)rect;
+    if (outPlanes) memset(outPlanes, 0, 64);
+    return -12;
+}
+static int b_AHardwareBuffer_unlock(void *buffer, int32_t *fence) { (void)buffer; if (fence) *fence = -1; return 0; }
+static int b_AHardwareBuffer_getId(const void *buffer, uint64_t *outId) { (void)buffer; if (outId) *outId = 0; return -12; }
+static void *b_AHardwareBuffer_fromHardwareBuffer(void *env, void *hardwareBuffer) { (void)env; (void)hardwareBuffer; return NULL; }
+static void *b_AHardwareBuffer_toHardwareBuffer(void *env, const void *buffer) { (void)env; (void)buffer; return NULL; }
+static int b_AHardwareBuffer_recvHandleFromUnixSocket(int socketFd, void **outBuffer) { (void)socketFd; if (outBuffer) *outBuffer = NULL; return -12; }
+static int b_AHardwareBuffer_sendHandleToUnixSocket(const void *buffer, int socketFd) { (void)buffer; (void)socketFd; return -12; }
+
+static void *b_ASurfaceControl_createFromWindow(void *parent, void *window) { (void)parent; (void)window; return NULL; }
+static void *b_ASurfaceControl_create(void *parent, const char *debug_name) { (void)parent; (void)debug_name; return NULL; }
+static void b_ASurfaceControl_release(void *surface_control) { (void)surface_control; }
+static void *b_ASurfaceTransaction_create(void) { return NULL; }
+static void b_ASurfaceTransaction_delete(void *transaction) { (void)transaction; }
+static void b_ASurfaceTransaction_apply(void *transaction) { (void)transaction; }
+static void b_ASurfaceTransaction_reparent(void *transaction, void *sc, void *new_parent) { (void)transaction; (void)sc; (void)new_parent; }
+static void b_ASurfaceTransaction_setBuffer(void *transaction, void *sc, void *buffer, int fence_fd) { (void)transaction; (void)sc; (void)buffer; (void)fence_fd; }
+static void b_ASurfaceTransaction_setColor(void *transaction, void *sc, float r, float g, float b, float a, int dataspace) { (void)transaction; (void)sc; (void)r; (void)g; (void)b; (void)a; (void)dataspace; }
+static void b_ASurfaceTransaction_setOnComplete(void *transaction, void *context, void *func) { (void)transaction; (void)context; (void)func; }
+static int b_ASurfaceTransactionStats_getPreviousReleaseFenceFd(void *stats) { (void)stats; return -1; }
+static void *b_ASurfaceTransaction_fromJava(void *env, void *transactionObj) { (void)env; (void)transactionObj; return NULL; }
+
 /* ---------------------------------------------------------------- windows */
 
 /*
@@ -1142,5 +1191,32 @@ const tl_bionic_entry tl_tab_ndk[] = {
     MEDIA_DATA(AMEDIAFORMAT_KEY_FRAME_RATE), MEDIA_DATA(AMEDIAFORMAT_KEY_HEIGHT), MEDIA_DATA(AMEDIAFORMAT_KEY_LANGUAGE),
     MEDIA_DATA(AMEDIAFORMAT_KEY_MIME), MEDIA_DATA(AMEDIAFORMAT_KEY_ROTATION), MEDIA_DATA(AMEDIAFORMAT_KEY_SAMPLE_RATE),
     MEDIA_DATA(AMEDIAFORMAT_KEY_SLICE_HEIGHT), MEDIA_DATA(AMEDIAFORMAT_KEY_STRIDE), MEDIA_DATA(AMEDIAFORMAT_KEY_WIDTH),
+    /* AHardwareBuffer */
+    TL_WRAP("AHardwareBuffer_isSupported", b_AHardwareBuffer_isSupported),
+    TL_WRAP("AHardwareBuffer_allocate", b_AHardwareBuffer_allocate),
+    TL_WRAP("AHardwareBuffer_acquire", b_AHardwareBuffer_acquire),
+    TL_WRAP("AHardwareBuffer_release", b_AHardwareBuffer_release),
+    TL_WRAP("AHardwareBuffer_describe", b_AHardwareBuffer_describe),
+    TL_WRAP("AHardwareBuffer_lock", b_AHardwareBuffer_lock),
+    TL_WRAP("AHardwareBuffer_lockPlanes", b_AHardwareBuffer_lockPlanes),
+    TL_WRAP("AHardwareBuffer_unlock", b_AHardwareBuffer_unlock),
+    TL_WRAP("AHardwareBuffer_getId", b_AHardwareBuffer_getId),
+    TL_WRAP("AHardwareBuffer_fromHardwareBuffer", b_AHardwareBuffer_fromHardwareBuffer),
+    TL_WRAP("AHardwareBuffer_toHardwareBuffer", b_AHardwareBuffer_toHardwareBuffer),
+    TL_WRAP("AHardwareBuffer_recvHandleFromUnixSocket", b_AHardwareBuffer_recvHandleFromUnixSocket),
+    TL_WRAP("AHardwareBuffer_sendHandleToUnixSocket", b_AHardwareBuffer_sendHandleToUnixSocket),
+    /* ASurfaceControl & ASurfaceTransaction */
+    TL_WRAP("ASurfaceControl_createFromWindow", b_ASurfaceControl_createFromWindow),
+    TL_WRAP("ASurfaceControl_create", b_ASurfaceControl_create),
+    TL_WRAP("ASurfaceControl_release", b_ASurfaceControl_release),
+    TL_WRAP("ASurfaceTransaction_create", b_ASurfaceTransaction_create),
+    TL_WRAP("ASurfaceTransaction_delete", b_ASurfaceTransaction_delete),
+    TL_WRAP("ASurfaceTransaction_apply", b_ASurfaceTransaction_apply),
+    TL_WRAP("ASurfaceTransaction_reparent", b_ASurfaceTransaction_reparent),
+    TL_WRAP("ASurfaceTransaction_setBuffer", b_ASurfaceTransaction_setBuffer),
+    TL_WRAP("ASurfaceTransaction_setColor", b_ASurfaceTransaction_setColor),
+    TL_WRAP("ASurfaceTransaction_setOnComplete", b_ASurfaceTransaction_setOnComplete),
+    TL_WRAP("ASurfaceTransactionStats_getPreviousReleaseFenceFd", b_ASurfaceTransactionStats_getPreviousReleaseFenceFd),
+    TL_WRAP("ASurfaceTransaction_fromJava", b_ASurfaceTransaction_fromJava),
     TL_END
 };

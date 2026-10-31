@@ -593,26 +593,39 @@ static uint32_t jni_GetVersion(void *env) { (void)env; return 0x00010006; }
 static jo jni_FindClass(void *env, const char *name)
 {
     (void)env;
-    bool array = name[0] == '[';
-    bool framework = !strncmp(name, "android/", 8) || !strncmp(name, "java/", 5) || !strncmp(name, "javax/", 6)
-                  || !strncmp(name, "dalvik/", 7) || !strncmp(name, "libcore/", 8) || !strncmp(name, "sun/", 4)
-                  || !strncmp(name, "org/json/", 9) || !strncmp(name, "org/xml/", 8) || !strncmp(name, "org/w3c/", 8);
+    if (!name) return NULL;
+    char clean_buf[256];
+    const char *n = name;
+    if (n[0] == 'L') {
+        size_t len = strlen(n);
+        if (len > 2 && n[len - 1] == ';') {
+            if (len - 2 < sizeof(clean_buf)) {
+                memcpy(clean_buf, n + 1, len - 2);
+                clean_buf[len - 2] = '\0';
+                n = clean_buf;
+            }
+        }
+    }
+    bool array = n[0] == '[';
+    bool framework = !strncmp(n, "android/", 8) || !strncmp(n, "java/", 5) || !strncmp(n, "javax/", 6)
+                  || !strncmp(n, "dalvik/", 7) || !strncmp(n, "libcore/", 8) || !strncmp(n, "sun/", 4)
+                  || !strncmp(n, "org/json/", 9) || !strncmp(n, "org/xml/", 8) || !strncmp(n, "org/w3c/", 8);
     tl_jclass *known;
-    pthread_mutex_lock(&g_lock); known = find_class_locked(name); pthread_mutex_unlock(&g_lock);
+    pthread_mutex_lock(&g_lock); known = find_class_locked(n); pthread_mutex_unlock(&g_lock);
     if (tl_dvm && !known && !array) {
         /* the Java runtime is up: a class exists when some DEX on its class paths defines it */
-        tl_jclass *c = tl_jni_class(name);
+        tl_jclass *c = tl_jni_class(n);
         if (c->dvm || framework) return c->mirror;
-        char msg[200]; snprintf(msg, sizeof(msg), "%s", name);
+        char msg[200]; snprintf(msg, sizeof(msg), "%s", n);
         tl_jni_throw("java/lang/NoClassDefFoundError", msg);
         return NULL;
     }
-    if (array || framework || known || tl_dexidx_has_class(name)) {
-        TRACE("jni: FindClass(%s)", name);
-        return tl_jni_class(name)->mirror;
+    if (array || framework || known || tl_dexidx_has_class(n)) {
+        TRACE("jni: FindClass(%s)", n);
+        return tl_jni_class(n)->mirror;
     }
-    TRACE("jni: FindClass(%s) -> NoClassDefFoundError", name);
-    char msg[200]; snprintf(msg, sizeof(msg), "%s", name);
+    TRACE("jni: FindClass(%s) -> NoClassDefFoundError", n);
+    char msg[200]; snprintf(msg, sizeof(msg), "%s", n);
     tl_jni_throw("java/lang/NoClassDefFoundError", msg);
     return NULL;
 }
