@@ -20,6 +20,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <malloc/malloc.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <strings.h>
