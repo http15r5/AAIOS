@@ -715,10 +715,19 @@ static void b_AWorkDuration_set(void *w, int64_t v) { (void)w; (void)v; }
 static int b_ASharedMemory_create(const char *name, size_t size)
 {
     (void)name;
-    char path[] = "/tmp/husk-ashmem-XXXXXX";
+    const char *tmp = getenv("TMPDIR");
+    if (!tmp || !*tmp) tmp = "/tmp";
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/husk-ashmem-XXXXXX", tmp);
     int fd = mkstemp(path);
+    if (fd < 0) {
+        char fallback[] = "/tmp/husk-ashmem-XXXXXX";
+        fd = mkstemp(fallback);
+        if (fd >= 0) unlink(fallback);
+    } else {
+        unlink(path);
+    }
     if (fd < 0) return -1;
-    unlink(path);
     if (ftruncate(fd, (off_t)size)) { close(fd); return -1; }
     return fd;
 }

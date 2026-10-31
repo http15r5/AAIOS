@@ -228,12 +228,17 @@ static CTFontRef font_with_cascade(CTFontRef f)
         CFRelease(sys);
     }
 
-    /* Also explicitly append AppleColorEmoji, Apple Symbols, Symbol, SF Pro, Geneva, Menlo */
+    /* Also explicitly append AppleColorEmoji, Apple Symbols, Symbol, ZapfDingbatsITC, SF Pro, Geneva, Menlo and regional scripts */
     static const CFStringRef fallbackNames[] = {
         CFSTR("AppleColorEmoji"),
         CFSTR(".AppleSystemUIFont"),
+        CFSTR("ZapfDingbatsITC"),
         CFSTR("Apple Symbols"),
         CFSTR("Symbol"),
+        CFSTR("PingFangSC-Regular"),
+        CFSTR("AppleSDGothicNeo-Regular"),
+        CFSTR("HiraginoSans-W3"),
+        CFSTR("GeezaPro"),
         CFSTR("Geneva"),
         CFSTR("Menlo")
     };

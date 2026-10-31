@@ -443,7 +443,7 @@ typedef struct { uint32_t flags; uint32_t pad; void *stack_base; size_t stack_si
 _Static_assert(sizeof(guest_attr) == 56, "bionic pthread_attr_t is 56 bytes on LP64");
 _Static_assert(sizeof(guest_obj) <= 16, "guest_obj must fit bionic's smallest object, sem_t");
 #define GATTR_DETACHED 1u
-#define DEFAULT_STACK (4096u * 1024u)
+#define DEFAULT_STACK (1024u * 1024u)
 
 static int b_attr_init(guest_attr *a)
 {
@@ -538,8 +538,8 @@ static int b_create(pthread_t *out, const guest_attr *attr, void *(*fn)(void *),
     pthread_attr_t a;
     pthread_attr_init(&a);
     size_t stack = attr && attr->stack_size ? attr->stack_size : DEFAULT_STACK;
-    if (stack < (4096u * 1024u)) stack = 4096u * 1024u;
-    if (stack > (16u << 20)) stack = 16u << 20;
+    if (stack < (512u * 1024u)) stack = 512u * 1024u;
+    if (stack > (8u << 20)) stack = 8u << 20;
     stack = (stack + 16383) & ~(size_t)16383;
     pthread_attr_setstacksize(&a, stack);
     if (attr && (attr->flags & GATTR_DETACHED)) pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
@@ -547,16 +547,16 @@ static int b_create(pthread_t *out, const guest_attr *attr, void *(*fn)(void *),
     c->fn = fn; c->arg = arg;
     pthread_t t;
     int r = pthread_create(&t, &a, start_thunk, c);
-    if (r && stack > 4096 * 1024) {
-        pthread_attr_setstacksize(&a, 4096 * 1024);
-        r = pthread_create(&t, &a, start_thunk, c);
-    }
     if (r && stack > 2048 * 1024) {
         pthread_attr_setstacksize(&a, 2048 * 1024);
         r = pthread_create(&t, &a, start_thunk, c);
     }
     if (r && stack > 1024 * 1024) {
         pthread_attr_setstacksize(&a, 1024 * 1024);
+        r = pthread_create(&t, &a, start_thunk, c);
+    }
+    if (r && stack > 512 * 1024) {
+        pthread_attr_setstacksize(&a, 512 * 1024);
         r = pthread_create(&t, &a, start_thunk, c);
     }
     if (r) {

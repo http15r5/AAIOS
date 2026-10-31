@@ -868,23 +868,23 @@ NAT(Thread_nativeCreate)
     dvm_field *pf = thread_peer(th_obj);
     if (pf) dvm_slots(th_obj)[pf->slot].j = (int64_t)(uintptr_t)th_obj;     /* alive from here (before it runs: start() then isAlive() is true) */
     pthread_attr_t at; pthread_attr_init(&at);
-    if (stack == 0) stack = (4u << 20);
-    if (stack < (4u << 20)) stack = 4u << 20;
-    if (stack > (16u << 20)) stack = 16u << 20;
+    if (stack == 0) stack = (1024u * 1024u);
+    if (stack < (512u * 1024u)) stack = 512u * 1024u;
+    if (stack > (8u << 20)) stack = 8u << 20;
     pthread_attr_setstacksize(&at, stack);
     pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
     pthread_t th;
     int r = pthread_create(&th, &at, thread_main, s);
-    if (r != 0 && stack > (4u << 20)) {
-        pthread_attr_setstacksize(&at, 4u << 20);
-        r = pthread_create(&th, &at, thread_main, s);
-    }
     if (r != 0 && stack > (2u << 20)) {
         pthread_attr_setstacksize(&at, 2u << 20);
         r = pthread_create(&th, &at, thread_main, s);
     }
-    if (r != 0) {
+    if (r != 0 && stack > (1024u * 1024u)) {
         pthread_attr_setstacksize(&at, 1024u * 1024u);
+        r = pthread_create(&th, &at, thread_main, s);
+    }
+    if (r != 0 && stack > (512u * 1024u)) {
+        pthread_attr_setstacksize(&at, 512u * 1024u);
         r = pthread_create(&th, &at, thread_main, s);
     }
     pthread_attr_destroy(&at);

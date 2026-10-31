@@ -106,6 +106,25 @@ static struct sigaction g_prev[32];
 static void on_fatal(int sig, siginfo_t *info, void *uctx)
 {
     ucontext_t *uc = uctx;
+    if (uc && (sig == SIGSEGV || sig == SIGBUS) && (uintptr_t)info->si_addr < 0x1000) {
+        bool is_deadcode = false;
+        for (int r = 0; r < 29; r++) {
+            if ((uint32_t)uc->uc_mcontext->__ss.__x[r] == 0xdeadc0de) {
+                is_deadcode = true;
+                break;
+            }
+        }
+        if (is_deadcode) {
+            tl_log_line("ld: caught Bedrock intentional assert trap (0xdeadc0de) at pc %p, returning to lr %p",
+                        (void *)uc->uc_mcontext->__ss.__pc, (void *)uc->uc_mcontext->__ss.__lr);
+            if (uc->uc_mcontext->__ss.__lr) {
+                uc->uc_mcontext->__ss.__pc = uc->uc_mcontext->__ss.__lr;
+            } else {
+                uc->uc_mcontext->__ss.__pc += 4;
+            }
+            return;
+        }
+    }
     char tn[40] = "", a[200], b[200], c[200];
     pthread_getname_np(pthread_self(), tn, sizeof(tn));
     where(a, sizeof(a), (uintptr_t)uc->uc_mcontext->__ss.__pc);

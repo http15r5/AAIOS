@@ -64,7 +64,6 @@ static void *b_new(size_t n)
     }
     if (!p) {
         size_t psz = (sz + sizeof(husk_mmap_hdr_t) + 0x3FFF) & ~0x3FFFull;
-        if (psz < 0x40000) psz = 0x40000;
         void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
         if (m == MAP_FAILED) {
             vm_address_t addr = 0;
@@ -116,7 +115,6 @@ static void *b_new_nothrow(size_t n, const void *nt)
     }
     if (!p) {
         size_t psz = (sz + sizeof(husk_mmap_hdr_t) + 0x3FFF) & ~0x3FFFull;
-        if (psz < 0x40000) psz = 0x40000;
         void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
         if (m == MAP_FAILED) {
             vm_address_t addr = 0;
