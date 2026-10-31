@@ -313,6 +313,7 @@ static void *b_AAssetManager_open(void *mgr, const char *name, int mode)
             if (buf && fread(buf, 1, (size_t)n, fp) == (size_t)n) {
                 fclose(fp);
                 tl_asset *a = calloc(1, sizeof(*a));
+                if (!a) { free(buf); return NULL; }
                 a->data = buf; a->len = (size_t)n; a->owned = buf;
                 snprintf(a->name, sizeof(a->name), "%s", name);
                 return a;
@@ -350,6 +351,11 @@ static void *b_AAssetManager_open(void *mgr, const char *name, int mode)
                 return NULL;
             }
             tl_asset *a = calloc(1, sizeof(*a));
+            if (!a) {
+                if (owned) free((void *)data);
+                tl_log_line("assets: %s: failed to allocate asset structure", name);
+                return NULL;
+            }
             a->data = data; a->len = n;
             if (owned) a->owned = (uint8_t *)data;
             snprintf(a->name, sizeof(a->name), "%s", cands[c]);
@@ -567,6 +573,7 @@ static void *b_AAssetManager_openDir(void *mgr, const char *dir)
     }
 
     tl_assetdir *d = calloc(1, sizeof(*d));
+    if (!d) return NULL;
     size_t cap = 0;
 
     if (getenv("TL_ASSET_DIR")) {

@@ -426,6 +426,48 @@ static void Ecdsa_sign(tl_jcall *c)
     c->ret = vl(a);
 }
 
+static void b64url_encode(const uint8_t *in, size_t len, char *out, size_t out_sz)
+{
+    static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    size_t o = 0;
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t val = (uint32_t)in[i] << 16;
+        if (i + 1 < len) val |= (uint32_t)in[i + 1] << 8;
+        if (i + 2 < len) val |= in[i + 2];
+        if (o + 1 < out_sz) out[o++] = tbl[(val >> 18) & 0x3f];
+        if (o + 1 < out_sz) out[o++] = tbl[(val >> 12) & 0x3f];
+        if (i + 1 < len && o + 1 < out_sz) out[o++] = tbl[(val >> 6) & 0x3f];
+        if (i + 2 < len && o + 1 < out_sz) out[o++] = tbl[val & 0x3f];
+    }
+    if (o < out_sz) out[o] = '\0';
+}
+static void Ecc_getBase64UrlX(tl_jcall *c)
+{
+    char buf[64];
+    b64url_encode(k_p256_gx, 32, buf, sizeof(buf));
+    c->ret = vl(STR(buf));
+}
+static void Ecc_getBase64UrlY(tl_jcall *c)
+{
+    char buf[64];
+    b64url_encode(k_p256_gy, 32, buf, sizeof(buf));
+    c->ret = vl(STR(buf));
+}
+static void Sha_init(tl_jcall *c) { (void)c; }
+static void Sha_addBytes(tl_jcall *c) { (void)c; }
+static void Sha_signHash(tl_jcall *c)
+{
+    jobj *a = tl_jni_new_prim_array('B', 64);
+    if (a && a->arr.data) arc4random_buf(a->arr.data, 64);
+    c->ret = vl(a);
+}
+static void Sha_getHash(tl_jcall *c)
+{
+    jobj *a = tl_jni_new_prim_array('B', 32);
+    if (a && a->arr.data) arc4random_buf(a->arr.data, 32);
+    c->ret = vl(a);
+}
+
 static void MA_getImageData(tl_jcall *c)
 {
     jobj *str = c->args[0].l;
@@ -560,6 +602,7 @@ static const struct { const char *name, *super; } k_classes[] = {
     { "com/microsoft/xal/crypto/SecureRandom", "java/lang/Object" }, { "com/microsoft/xbox/idp/interop/Interop", "java/lang/Object" },
     { "com/microsoft/xboxlive/LocalStorage", "java/lang/Object" }, { "com/microsoft/playfab/utilities/multiplayer/AndroidJniHelperMultiplayer", "java/lang/Object" },
     { "com/microsoft/xal/crypto/Ecdsa", "java/lang/Object" }, { "com/microsoft/xal/crypto/EccPubKey", "java/lang/Object" },
+    { "com/microsoft/xal/crypto/ShaHasher", "java/lang/Object" },
 };
 
 #define MAIN "com/mojang/minecraftpe/MainActivity"
@@ -673,6 +716,17 @@ static const tl_jhle k_hle[] = {
     M_("com/microsoft/xal/crypto/EccPubKey", "getEncoded", "()[B", Ecc_getBytes),
     M_("com/microsoft/xal/crypto/EccPubKey", "getX", "()[B", Ecc_getX),
     M_("com/microsoft/xal/crypto/EccPubKey", "getY", "()[B", Ecc_getY),
+    M_("com/microsoft/xal/crypto/EccPubKey", "getBase64UrlX", "()Ljava/lang/String;", Ecc_getBase64UrlX),
+    M_("com/microsoft/xal/crypto/EccPubKey", "getBase64UrlY", "()Ljava/lang/String;", Ecc_getBase64UrlY),
+    M_("com/microsoft/xal/crypto/ShaHasher", "<init>", "()V", Sha_init),
+    M_("com/microsoft/xal/crypto/ShaHasher", "AddBytes", "([B)V", Sha_addBytes),
+    M_("com/microsoft/xal/crypto/ShaHasher", "addBytes", "([B)V", Sha_addBytes),
+    M_("com/microsoft/xal/crypto/ShaHasher", "SignHash", "()[B", Sha_signHash),
+    M_("com/microsoft/xal/crypto/ShaHasher", "signHash", "()[B", Sha_signHash),
+    M_("com/microsoft/xal/crypto/ShaHasher", "GetHash", "()[B", Sha_getHash),
+    M_("com/microsoft/xal/crypto/ShaHasher", "getHash", "()[B", Sha_getHash),
+    M_("com/microsoft/xal/crypto/ShaHasher", "Reset", "()V", Noop),
+    M_("com/microsoft/xal/crypto/ShaHasher", "reset", "()V", Noop),
     M_("com/microsoft/xbox/idp/interop/Interop", "GetLocalStoragePath", "(Landroid/content/Context;)Ljava/lang/String;", XAL_storagePath),
     M_("com/microsoft/xbox/idp/interop/Interop", "getApplicationContext", "()Landroid/content/Context;", XAL_appContext),
     M_("com/microsoft/xbox/idp/interop/Interop", "getLocale", "()Ljava/lang/String;", XAL_locale),

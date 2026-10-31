@@ -383,6 +383,32 @@ static void XRes_body(tl_jcall *c)
     free(r->rs.body); r->rs.body = NULL; r->rs.body_len = 0;
 }
 
+#define XWS  "com/xbox/httpclient/HttpClientWebSocket"
+
+typedef struct { int64_t owner; } xws;
+static xws *XW(jobj *o) { if (!o->native) o->native = calloc(1, sizeof(xws)); return o->native; }
+
+static void XWS_init(tl_jcall *c)
+{
+    xws *w = XW(c->self);
+    w->owner = c->args[0].j;
+    tl_jni_set_field(c->self, "owner", "J", c->args[0]);
+}
+static void XWS_addHeader(tl_jcall *c) { (void)c; }
+static void XWS_setPingInterval(tl_jcall *c) { (void)c; }
+static void XWS_disconnect(tl_jcall *c) { (void)c; }
+static void XWS_send(tl_jcall *c) { c->ret = vz(0); }
+
+static void XWS_connect(tl_jcall *c)
+{
+    const char *url = S(c->args[0].l);
+    const char *sub = S(c->args[1].l);
+    tl_log_line("http: HttpClientWebSocket connect to '%s' (subprotocol '%s')", url, sub);
+    typedef void (*fail_fn)(void *env, void *self, int err);
+    fail_fn fail = x_native(XWS, "onFailure", "(I)V", "Java_com_xbox_httpclient_HttpClientWebSocket_onFailure");
+    if (fail) fail(tl_jni_env(), c->self, 0);
+}
+
 static const tl_jhle k_xbox[] = {
     M_(XREQ, "<init>", "(Landroid/content/Context;)V", XReq_init), M_(XREQ, "setHttpUrl", "(Ljava/lang/String;)V", XReq_url),
     M_(XREQ, "setHttpHeader", "(Ljava/lang/String;Ljava/lang/String;)V", XReq_header),
@@ -391,6 +417,13 @@ static const tl_jhle k_xbox[] = {
     M_(XRES, "getHeaderNameAtIndex", "(I)Ljava/lang/String;", XRes_headerName), M_(XRES, "getHeaderValueAtIndex", "(I)Ljava/lang/String;", XRes_headerValue),
     M_(XRES, "getResponseBodyBytes", "()V", XRes_body),
     M_("com/xbox/httpclient/NetworkObserver", "Initialize", "(Landroid/content/Context;)V", Noop), M_("com/xbox/httpclient/NetworkObserver", "Cleanup", "(Landroid/content/Context;)V", Noop),
+    M_(XWS, "<init>", "(J)V", XWS_init),
+    M_(XWS, "addHeader", "(Ljava/lang/String;Ljava/lang/String;)V", XWS_addHeader),
+    M_(XWS, "setPingInterval", "(J)V", XWS_setPingInterval),
+    M_(XWS, "connect", "(Ljava/lang/String;Ljava/lang/String;)V", XWS_connect),
+    M_(XWS, "disconnect", "(I)V", XWS_disconnect),
+    M_(XWS, "sendMessage", "(Ljava/lang/String;)Z", XWS_send),
+    M_(XWS, "sendBinaryMessage", "(Ljava/nio/ByteBuffer;)Z", XWS_send),
     { NULL, NULL, NULL, NULL }
 };
 
@@ -403,6 +436,7 @@ void tl_http_install(void)
     tl_jni_declare("com/xbox/httpclient/HttpClientRequest", "java/lang/Object"); tl_jni_declare("com/xbox/httpclient/HttpClientResponse", "java/lang/Object");
     tl_jni_declare("com/xbox/httpclient/HttpClientRequestBody$NativeInputStream", "java/lang/Object"); tl_jni_declare("com/xbox/httpclient/HttpClientResponse$NativeOutputStream", "java/lang/Object");
     tl_jni_declare("com/xbox/httpclient/NetworkObserver", "java/lang/Object");
+    tl_jni_declare(XWS, "java/lang/Object");
     tl_jni_register_hle(k_xbox);
     tl_jni_declare("java/util/HashMap", "java/lang/Object");
     tl_jni_declare(CLS, "java/lang/Object");
