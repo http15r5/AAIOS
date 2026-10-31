@@ -6,6 +6,7 @@
 #include "husk-tl-bionic.h"
 
 #include <ctype.h>
+#include <inttypes.h>
 #include <crt_externs.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -810,6 +811,19 @@ static const char *g_sys_signame[32] = { "Unknown signal", "HUP", "INT", "QUIT",
     "USR1", "SEGV", "USR2", "PIPE", "ALRM", "TERM", "STKFLT", "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG", "XCPU",
     "XFSZ", "VTALRM", "PROF", "WINCH", "IO", "PWR", "SYS" };
 
+static int b_isdigit(int c) { return c >= '0' && c <= '9'; }
+static int b_wctomb(char *s, wchar_t wc) { return wctomb(s, wc); }
+static int b_getchar(void) { return getchar(); }
+static char *b_tmpnam(char *s) { return tmpnam(s); }
+static int b_scanf(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vscanf(fmt, ap);
+    va_end(ap);
+    return r;
+}
+
 /* ---------------------------------------------------------------- tables */
 
 const tl_bionic_entry tl_tab_str[] = {
@@ -827,6 +841,9 @@ const tl_bionic_entry tl_tab_str[] = {
     TL_WRAP("__strlen_chk", b___strlen_chk), TL_WRAP("__strchr_chk", b___strchr_chk), TL_WRAP("__strncat_chk", b___strncat_chk),
     TL_WRAP("__strncpy_chk2", b___strncpy_chk2),
     /* ctype.h, wctype.h */
+    TL_WRAP("isdigit", b_isdigit), TL_WRAP("wctomb", b_wctomb),
+    TL_DIRECT(labs), TL_DIRECT(llabs), TL_DIRECT(imaxabs), TL_DIRECT(imaxdiv),
+    TL_DIRECT(wcstoimax), TL_DIRECT(wcstoumax),
     TL_DIRECT(isalnum), TL_DIRECT(isalpha), TL_DIRECT(islower), TL_DIRECT(isupper), TL_DIRECT(isxdigit),
     TL_DIRECT(tolower), TL_DIRECT(toupper), TL_DIRECT(isdigit_l), TL_DIRECT(islower_l), TL_DIRECT(isupper_l),
     TL_DIRECT(isxdigit_l), TL_DIRECT(tolower_l), TL_DIRECT(toupper_l),
@@ -1022,6 +1039,7 @@ const tl_bionic_entry tl_tab_str2[] = {
     TL_WRAP("perror", b_perror), TL_WRAP("rewind", b_rewind), TL_WRAP("fputwc", b_fputwc), TL_WRAP("putwc", b_fputwc), TL_WRAP("fgetwc", b_fgetwc), TL_WRAP("getwc", b_fgetwc), TL_WRAP("ungetwc", b_ungetwc),
     TL_WRAP("fgetws", b_fgetws), TL_WRAP("fputws", b_fputws), TL_WRAP("fwide", b_fwide), TL_WRAP("popen", b_popen), TL_WRAP("pclose", b_pclose),
     TL_WRAP("tmpfile", b_tmpfile), TL_WRAP("wcsrtombs", b_wcsrtombs),
+    TL_WRAP("getchar", b_getchar), TL_WRAP("tmpnam", b_tmpnam), TL_WRAP("scanf", b_scanf),
     TL_DIRECT(strncat), TL_DIRECT(strptime), TL_DIRECT(ldiv), TL_DIRECT(sleep), TL_DIRECT(pause), TL_DIRECT(arc4random_buf), TL_DIRECT(nan), TL_DIRECT(nanf),
     /* the rest of libm a guest may import (most are inlined as instructions, some libraries call them) */
     TL_DIRECT(ceilf), TL_DIRECT(copysignf), TL_DIRECT(erfcf), TL_DIRECT(fdim), TL_DIRECT(fdimf), TL_DIRECT(floorf), TL_DIRECT(fma), TL_DIRECT(fmaf),

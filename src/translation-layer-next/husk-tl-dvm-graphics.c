@@ -509,7 +509,7 @@ static void paint_end_clip(CGContextRef c, const int32_t *p, bool layered, CGRec
         CGContextSetShadowWithColor(c, CGSizeZero, 0, NULL);
         int m = p[P_CFMODE];
         CGContextSetBlendMode(c, m == 3 ? kCGBlendModeNormal : blend_of(m));
-        if (clip) { CGContextSaveGState(c); clip(c, ctx); CGContextFillRect(c, CGRectInset(area, -2, -2)); CGContextRestoreGState(c); }
+        if (m == 13 && clip) { CGContextSaveGState(c); clip(c, ctx); CGContextFillRect(c, CGRectInset(area, -2, -2)); CGContextRestoreGState(c); }
         else CGContextFillRect(c, CGRectInset(area, -2, -2));
         CGContextEndTransparencyLayer(c);
     }
@@ -1139,11 +1139,6 @@ NAT(G_cvDrawBitmap)
         CGContextSetFillColorWithColor(c, CGColorGetConstantColor(kCGColorBlack));
         CGContextSetAlpha(c, (float)((uint32_t)q[P_COLOR] >> 24) / 255.0f);
         CGContextSaveGState(c);
-        if (pf(q, P_SHRAD) > 0) {
-            CGColorRef sc = color_of((uint32_t)q[P_SHCOL], 1);
-            CGContextSetShadowWithColor(c, CGSizeMake(pf(q, P_SHDX), -pf(q, P_SHDY)), pf(q, P_SHRAD), sc);
-            CGColorRelease(sc);
-        }
         CGContextTranslateCTM(c, dl, db); CGContextScaleCTM(c, 1, -1);
         CGContextDrawImage(c, CGRectMake(0, 0, dr - dl, db - dt), img);
         CGContextRestoreGState(c);
@@ -1169,11 +1164,6 @@ NAT(G_cvDrawBitmapM)
     if (paint_begin(c, q, &layered)) {
         CGContextSetAlpha(c, (float)((uint32_t)q[P_COLOR] >> 24) / 255.0f);
         CGContextSaveGState(c);
-        if (pf(q, P_SHRAD) > 0) {
-            CGColorRef sc = color_of((uint32_t)q[P_SHCOL], 1);
-            CGContextSetShadowWithColor(c, CGSizeMake(pf(q, P_SHDX), -pf(q, P_SHDY)), pf(q, P_SHRAD), sc);
-            CGColorRelease(sc);
-        }
         CGContextConcatCTM(c, CGAffineTransformMake(m[0], m[3], m[1], m[4], m[2], m[5]));
         CGContextTranslateCTM(c, 0, b->h); CGContextScaleCTM(c, 1, -1);
         CGContextDrawImage(c, CGRectMake(0, 0, b->w, b->h), img);

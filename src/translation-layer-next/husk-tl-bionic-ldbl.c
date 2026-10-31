@@ -23,6 +23,7 @@
 #include <sys/uio.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <fenv.h>
 #include <zlib.h>
 
 #include "husk-tl-bionic.h"
@@ -82,7 +83,7 @@ L1(acoshl, acosh) L1(acosl, acos) L1(asinhl, asinh) L1(asinl, asin) L1(atanhl, a
 L1(ceill, ceil) L1(coshl, cosh) L1(cosl, cos) L1(exp2l, exp2) L1(expl, exp) L1(expm1l, expm1) L1(floorl, floor)
 L1(log10l, log10) L1(log1pl, log1p) L1(log2l, log2) L1(logl, log) L1(rintl, rint) L1(sinhl, sinh) L1(sinl, sin)
 L1(sqrtl, sqrt) L1(tanhl, tanh) L1(tanl, tan) L1(truncl, trunc) L1(fabsl, fabs) L1(roundl, round) L1(nearbyintl, nearbyint)
-L1(erfl, erf) L1(erfcl, erfc) L1(tgammal, tgamma) L1(lgammal, lgamma)
+L1(erfl, erf) L1(erfcl, erfc) L1(tgammal, tgamma) L1(lgammal, lgamma) L1(logbl, logb)
 L2(atan2l, atan2) L2(fmodl, fmod) L2(hypotl, hypot) L2(powl, pow) L2(fmaxl, fmax) L2(fminl, fmin) L2(copysignl, copysign)
 L2(remainderl, remainder) L2(fdiml, fdim)
 
@@ -93,6 +94,15 @@ static q128 b_modfl(q128 x, q128 *ip) { double i; double f = modf(q2d(x), &i); i
 static void b_sincosl(q128 x, q128 *s, q128 *c) { double d = q2d(x); if (s) *s = d2q(sin(d)); if (c) *c = d2q(cos(d)); }
 static long b_lrintl(q128 x) { return lrint(q2d(x)); }
 static long b_lroundl(q128 x) { return lround(q2d(x)); }
+static long long b_llrintl(q128 x) { return llrint(q2d(x)); }
+static long long b_llroundl(q128 x) { return llround(q2d(x)); }
+static int b_ilogbl(q128 x) { return ilogb(q2d(x)); }
+static q128 b_fmal(q128 x, q128 y, q128 z) { return d2q(fma(q2d(x), q2d(y), q2d(z))); }
+static q128 b_nanl(const char *tagp) { return d2q(nan(tagp ? tagp : "")); }
+static q128 b_scalblnl(q128 x, long n) { return d2q(scalbln(q2d(x), n)); }
+static q128 b_remquol(q128 x, q128 y, int *quo) { return d2q(remquo(q2d(x), q2d(y), quo)); }
+static int b_fegetexceptflag(fexcept_t *flagp, int excepts) { (void)flagp; (void)excepts; return 0; }
+static int b_fesetexceptflag(const fexcept_t *flagp, int excepts) { (void)flagp; (void)excepts; return 0; }
 static int b___isinfl(q128 x) { return isinf(q2d(x)); }
 /* bionic's names for signbit on double and float (Darwin's libm calls them __signbitd/__signbitf): fmt's FormatDouble asks */
 static int b___signbit(double x) { return signbit(x) != 0; }
@@ -199,7 +209,7 @@ const tl_bionic_entry tl_tab_ldbl[] = {
     TL_WRAP("atanhl", b_atanhl), TL_WRAP("atanl", b_atanl), TL_WRAP("cbrtl", b_cbrtl), TL_WRAP("ceill", b_ceill),
     TL_WRAP("coshl", b_coshl), TL_WRAP("cosl", b_cosl), TL_WRAP("exp2l", b_exp2l), TL_WRAP("expl", b_expl),
     TL_WRAP("expm1l", b_expm1l), TL_WRAP("floorl", b_floorl), TL_WRAP("log10l", b_log10l), TL_WRAP("log1pl", b_log1pl),
-    TL_WRAP("log2l", b_log2l), TL_WRAP("logl", b_logl), TL_WRAP("rintl", b_rintl), TL_WRAP("sinhl", b_sinhl),
+    TL_WRAP("log2l", b_log2l), TL_WRAP("logl", b_logl), TL_WRAP("logbl", b_logbl), TL_WRAP("rintl", b_rintl), TL_WRAP("sinhl", b_sinhl),
     TL_WRAP("sinl", b_sinl), TL_WRAP("sqrtl", b_sqrtl), TL_WRAP("tanhl", b_tanhl), TL_WRAP("tanl", b_tanl),
     TL_WRAP("truncl", b_truncl), TL_WRAP("fabsl", b_fabsl), TL_WRAP("roundl", b_roundl), TL_WRAP("nearbyintl", b_nearbyintl),
     TL_WRAP("erfl", b_erfl), TL_WRAP("erfcl", b_erfcl), TL_WRAP("tgammal", b_tgammal), TL_WRAP("lgammal", b_lgammal),
@@ -207,9 +217,13 @@ const tl_bionic_entry tl_tab_ldbl[] = {
     TL_WRAP("fmaxl", b_fmaxl), TL_WRAP("fminl", b_fminl), TL_WRAP("copysignl", b_copysignl), TL_WRAP("remainderl", b_remainderl),
     TL_WRAP("fdiml", b_fdiml), TL_WRAP("ldexpl", b_ldexpl), TL_WRAP("scalbnl", b_scalbnl), TL_WRAP("frexpl", b_frexpl),
     TL_WRAP("modfl", b_modfl), TL_WRAP("sincosl", b_sincosl), TL_WRAP("lrintl", b_lrintl), TL_WRAP("lroundl", b_lroundl),
+    TL_WRAP("llrintl", b_llrintl), TL_WRAP("llroundl", b_llroundl), TL_WRAP("ilogbl", b_ilogbl),
+    TL_WRAP("fmal", b_fmal), TL_WRAP("nanl", b_nanl), TL_WRAP("scalblnl", b_scalblnl), TL_WRAP("remquol", b_remquol),
+    TL_WRAP("fegetexceptflag", b_fegetexceptflag), TL_WRAP("fesetexceptflag", b_fesetexceptflag),
     TL_WRAP("__isinfl", b___isinfl), TL_WRAP("__isnanl", b___isnanl), TL_WRAP("nextafterl", b_nextafterl),
     TL_WRAP("__signbit", b___signbit), TL_WRAP("__signbitf", b___signbitf),
     TL_WRAP("nexttowardl", b_nextafterl),
+    TL_DIRECT(rint),
     TL_DIRECT(copysign), TL_DIRECT(erf), TL_DIRECT(erfc), TL_DIRECT(readv), TL_DIRECT(sync), TL_DIRECT(getsid),
     TL_DIRECT(tcgetpgrp), TL_DIRECT(tcsetpgrp), TL_DIRECT(getitimer), TL_DIRECT(setitimer), TL_DIRECT(wait4),
     TL_DIRECT(deflateCopy), TL_DIRECT(inflateCopy),

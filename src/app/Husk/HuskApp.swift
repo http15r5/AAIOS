@@ -36,6 +36,11 @@ enum HuskOrientation {
     @MainActor static func set(_ new: UIInterfaceOrientationMask, attempt: Int = 0) {
         mask = new
         UIViewController.enableOrientationOverride()
+        if new.contains(.landscapeLeft) || new.contains(.landscapeRight) || new == .landscape {
+            UIDevice.current.setValue(UIInterfaceOrientation.landscapeRight.rawValue, forKey: "orientation")
+        } else if new.contains(.portrait) {
+            UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+        }
         guard #available(iOS 16, *) else {
             // iOS 15 asks the view controllers again when the device turns; nudge it to ask now
             UIViewController.attemptRotationToDeviceOrientation()

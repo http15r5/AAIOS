@@ -220,21 +220,12 @@ final class TLUnityUIView: UIView, UIKeyInput {
         // Flutter lays itself out again at any size, as an Android view does when its window changes: a window being resized, the
         // screen turning.
         if engine == .flutter, launched { husk_flutter_resize(Int32(w), Int32(h)) }
-        // A landscape game is told its size once, when it starts, so it must not start while the screen is still
-        // turning: wait for a surface that is wider than it is tall.
-        // Unity games too: Fruit Ninja is a landscape one. If the screen has not turned after two seconds it is not going to,
-        // and the game starts as it is rather than not at all.
-        if firstLayout == nil, window != nil {
-            firstLayout = Date()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.1) { [weak self] in self?.setNeedsLayout() }
-        }
-        let waited = firstLayout.map { Date().timeIntervalSince($0) > 2 } ?? false
-        let ready = (portrait ? h > w : w > h) || waited
+        // A landscape game is told its size once, when it starts, so wait for the screen
+        // to finish turning to landscape (w >= h). A portrait game waits for h >= w.
+        let ready = portrait ? h >= w : w >= h
         if !launched, window != nil, ready {
-            let effW = portrait ? min(w, h) : max(w, h)
-            let effH = portrait ? max(w, h) : min(w, h)
-            (layer as? CAMetalLayer)?.drawableSize = CGSize(width: effW, height: effH)
-            launch(width: effW, height: effH)
+            (layer as? CAMetalLayer)?.drawableSize = CGSize(width: w, height: h)
+            launch(width: w, height: h)
         }
     }
 

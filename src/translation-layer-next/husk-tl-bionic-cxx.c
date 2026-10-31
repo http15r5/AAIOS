@@ -31,26 +31,23 @@ static void *b_new(size_t n)
     void *p = malloc(sz);
     if (!p) p = calloc(1, sz);
     if (!p) {
-        size_t pagesz = 4096;
-        size_t alloc_sz = (sz + pagesz - 1) & ~(pagesz - 1);
-        p = mmap(NULL, alloc_sz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
-        if (p == MAP_FAILED) p = NULL;
-    }
-    if (!p) {
         tl_log_line("cxx: operator new(%zu) failed out of memory", n);
-        return NULL;
+        abort();
     }
     return p;
 }
 static void *b_new_nothrow(size_t n, const void *nt)
 {
     (void)nt;
-    return b_new(n);
+    size_t sz = n ? n : 1;
+    void *p = malloc(sz);
+    if (!p) p = calloc(1, sz);
+    return p;
 }
 static void b_delete(void *p)
 {
     if (!p || (uintptr_t)p < 0x100000ull) return;
-    if (!malloc_zone_from_ptr(p)) return;
+    if (malloc_size(p) == 0) return;
     free(p);
 }
 static void b_delete_sized(void *p, size_t n) { (void)n; b_delete(p); }
