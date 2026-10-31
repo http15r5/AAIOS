@@ -38,6 +38,7 @@ static struct {
 
 static jvalue vl(void *p) { jvalue v; v.j = 0; v.l = p; return v; }
 static jvalue vi(int i) { jvalue v; v.j = 0; v.i = i; return v; }
+static jvalue vj(int64_t j) { jvalue v; v.j = j; return v; }
 static jvalue vz(int z) { jvalue v; v.j = 0; v.z = z != 0; return v; }
 static jvalue vf(float f) { jvalue v; v.j = 0; v.f = f; return v; }
 
