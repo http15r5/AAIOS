@@ -717,7 +717,7 @@ static int b_ASharedMemory_create(const char *name, size_t size)
     (void)name;
     const char *tmp = getenv("TMPDIR");
     if (!tmp || !*tmp) tmp = "/tmp";
-    char path[PATH_MAX];
+    char path[1024];
     snprintf(path, sizeof(path), "%s/husk-ashmem-XXXXXX", tmp);
     int fd = mkstemp(path);
     if (fd < 0) {
