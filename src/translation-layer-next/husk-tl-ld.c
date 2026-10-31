@@ -499,6 +499,17 @@ static bool is_cxx_runtime_symbol(const char *name)
     return false;
 }
 
+static bool is_cxx_allocator_symbol(const char *name)
+{
+    static const char *const names[] = {
+        "_Znwm", "_Znam", "_ZnwmRKSt9nothrow_t", "_ZnamRKSt9nothrow_t",
+        "_ZdlPv", "_ZdaPv", "_ZdlPvRKSt9nothrow_t", "_ZdaPvRKSt9nothrow_t",
+        "_ZdlPvm", "_ZdaPvm", NULL
+    };
+    for (int i = 0; names[i]; i++) if (!strcmp(name, names[i])) return true;
+    return false;
+}
+
 static void *lookup_for(tl_lib *L, const char *name, bool *weak_hit)
 {
     (void)weak_hit;
@@ -1549,6 +1560,21 @@ static uint64_t bind_symbol(tl_lib *L, uint32_t symidx, bool *failed)
     const elf_sym *s = sym_at(L, symidx);
     const char *name = sym_name(L, s);
     uint64_t val = 0;
+    for (int i = 0; i < g_ninterpose; i++) {
+        if (!strcmp(g_interpose[i].name, name)) {
+            val = (uint64_t)(uintptr_t)g_interpose[i].fn;
+            if (cached) L->symcache[symidx] = val ? val : 1;
+            return val;
+        }
+    }
+    if (is_cxx_allocator_symbol(name)) {
+        void *a = tl_bionic_find(name);
+        if (a) {
+            val = (uint64_t)(uintptr_t)a;
+            if (cached) L->symcache[symidx] = val ? val : 1;
+            return val;
+        }
+    }
     if (s->st_shndx != SHN_UNDEF_ && (s->st_info >> 4) != STB_WEAK_) {
         /* Defined here. Search the scope anyway so an earlier library's definition
          * wins, as it does under ELF interposition... except that a library's own

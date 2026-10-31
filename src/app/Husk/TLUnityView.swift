@@ -1141,8 +1141,13 @@ extension TLApp {
         case .landscape: return false
         case .portrait: return true
         case .auto:
-            // A Flutter app is a phone app: portrait, unless its manifest asks for landscape.
-            if screenEngine == .flutter || screenEngine == .java, let apk = apks.first { return husk_apk_orientation(apk) != 0 }
+            // A Flutter app or Java app: check manifest orientation; games default to landscape, apps to portrait
+            if screenEngine == .flutter || screenEngine == .java, let apk = apks.first {
+                let o = husk_apk_orientation(apk)
+                if o == 1 { return true }
+                if o == 0 { return false }
+                return husk_apk_is_game(apk) == 0
+            }
             if screenEngine == .gamemaker, let apk = apks.first {
                 let o = husk_gamemaker_orientation(apk)
                 return o == 1 || (o < 0 && husk_sdl_apk_is_portrait(apk) != 0)

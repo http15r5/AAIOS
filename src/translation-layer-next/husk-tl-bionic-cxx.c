@@ -28,10 +28,17 @@
 static void *b_new(size_t n)
 {
     void *p = malloc(n ? n : 1);
+    if (!p) p = calloc(1, n ? n : 1);
     if (!p) { tl_log_line("cxx: operator new(%zu) failed", n); abort(); }
     return p;
 }
-static void *b_new_nothrow(size_t n, const void *nt) { (void)nt; return malloc(n ? n : 1); }
+static void *b_new_nothrow(size_t n, const void *nt)
+{
+    (void)nt;
+    void *p = malloc(n ? n : 1);
+    if (!p) p = calloc(1, n ? n : 1);
+    return p;
+}
 static void b_delete(void *p) { free(p); }
 static void b_delete_sized(void *p, size_t n) { (void)n; free(p); }
 

@@ -342,148 +342,167 @@ static int b_rename(const char *a, const char *b)
 
 /* ----------------------------------------------------------- safe memory/string wrappers */
 
+static inline bool is_invalid_ptr(const void *p)
+{
+    uintptr_t u = (uintptr_t)p;
+    return u < 0x100000ull; /* Reject NULL and low unmapped pages (< 1 MB) */
+}
+
 static void *b_memcpy(void *d, const void *s, size_t n)
 {
-    if (!d || !s || !n) return d;
+    if (is_invalid_ptr(d) || is_invalid_ptr(s) || !n) return d;
     return memcpy(d, s, n);
 }
 
 static void *b_memmove(void *d, const void *s, size_t n)
 {
-    if (!d || !s || !n) return d;
+    if (is_invalid_ptr(d) || is_invalid_ptr(s) || !n) return d;
     return memmove(d, s, n);
 }
 
 static void *b_memset(void *d, int c, size_t n)
 {
-    if (!d || !n) return d;
+    if (is_invalid_ptr(d) || !n) return d;
     return memset(d, c, n);
 }
 
 static void *b_memchr(const void *s, int c, size_t n)
 {
-    if (!s || !n) return NULL;
+    if (is_invalid_ptr(s) || !n) return NULL;
     return memchr(s, c, n);
+}
+
+static void *b_memrchr(const void *s, int c, size_t n)
+{
+    if (is_invalid_ptr(s) || !n) return NULL;
+    const unsigned char *p = (const unsigned char *)s + n;
+    while (n--) {
+        p--;
+        if (*p == (unsigned char)c) return (void *)p;
+    }
+    return NULL;
 }
 
 static int b_memcmp(const void *s1, const void *s2, size_t n)
 {
-    if (!n) return 0;
-    if (!s1 || !s2) return s1 ? 1 : (s2 ? -1 : 0);
+    if (!n || s1 == s2) return 0;
+    if (is_invalid_ptr(s1)) return is_invalid_ptr(s2) ? 0 : -1;
+    if (is_invalid_ptr(s2)) return 1;
     return memcmp(s1, s2, n);
 }
 
 static size_t b_strlen(const char *s)
 {
-    if (!s) return 0;
+    if (is_invalid_ptr(s)) return 0;
     return strlen(s);
 }
 
 static size_t b_strnlen(const char *s, size_t maxlen)
 {
-    if (!s) return 0;
+    if (is_invalid_ptr(s) || !maxlen) return 0;
     return strnlen(s, maxlen);
 }
 
 static char *b_strcpy(char *d, const char *s)
 {
-    if (!d) return d;
-    if (!s) { *d = 0; return d; }
+    if (is_invalid_ptr(d)) return d;
+    if (is_invalid_ptr(s)) { *d = 0; return d; }
     return strcpy(d, s);
 }
 
 static char *b_strncpy(char *d, const char *s, size_t n)
 {
-    if (!d || !n) return d;
-    if (!s) { memset(d, 0, n); return d; }
+    if (is_invalid_ptr(d) || !n) return d;
+    if (is_invalid_ptr(s)) { memset(d, 0, n); return d; }
     return strncpy(d, s, n);
 }
 
 static int b_strcmp(const char *s1, const char *s2)
 {
     if (s1 == s2) return 0;
-    if (!s1) return -1;
-    if (!s2) return 1;
+    if (is_invalid_ptr(s1)) return is_invalid_ptr(s2) ? 0 : -1;
+    if (is_invalid_ptr(s2)) return 1;
     return strcmp(s1, s2);
 }
 
 static int b_strncmp(const char *s1, const char *s2, size_t n)
 {
     if (!n || s1 == s2) return 0;
-    if (!s1) return -1;
-    if (!s2) return 1;
+    if (is_invalid_ptr(s1)) return is_invalid_ptr(s2) ? 0 : -1;
+    if (is_invalid_ptr(s2)) return 1;
     return strncmp(s1, s2, n);
 }
 
 static char *b_strchr(const char *s, int c)
 {
-    if (!s) return NULL;
+    if (is_invalid_ptr(s)) return NULL;
     return strchr(s, c);
 }
 
 static char *b_strrchr(const char *s, int c)
 {
-    if (!s) return NULL;
+    if (is_invalid_ptr(s)) return NULL;
     return strrchr(s, c);
 }
 
 static char *b_strstr(const char *haystack, const char *needle)
 {
-    if (!haystack || !needle) return NULL;
+    if (is_invalid_ptr(haystack) || is_invalid_ptr(needle)) return NULL;
     return strstr(haystack, needle);
 }
 
 static wchar_t *b_wmemcpy(wchar_t *d, const wchar_t *s, size_t n)
 {
-    if (!d || !s || !n) return d;
+    if (is_invalid_ptr(d) || is_invalid_ptr(s) || !n) return d;
     return wmemcpy(d, s, n);
 }
 
 static wchar_t *b_wmemmove(wchar_t *d, const wchar_t *s, size_t n)
 {
-    if (!d || !s || !n) return d;
+    if (is_invalid_ptr(d) || is_invalid_ptr(s) || !n) return d;
     return wmemmove(d, s, n);
 }
 
 static wchar_t *b_wmemset(wchar_t *d, wchar_t c, size_t n)
 {
-    if (!d || !n) return d;
+    if (is_invalid_ptr(d) || !n) return d;
     return wmemset(d, c, n);
 }
 
 static wchar_t *b_wmemchr(const wchar_t *s, wchar_t c, size_t n)
 {
-    if (!s || !n) return NULL;
+    if (is_invalid_ptr(s) || !n) return NULL;
     return (wchar_t *)wmemchr(s, c, n);
 }
 
 static int b_wmemcmp(const wchar_t *s1, const wchar_t *s2, size_t n)
 {
-    if (!n) return 0;
-    if (!s1 || !s2) return s1 ? 1 : (s2 ? -1 : 0);
+    if (!n || s1 == s2) return 0;
+    if (is_invalid_ptr(s1)) return is_invalid_ptr(s2) ? 0 : -1;
+    if (is_invalid_ptr(s2)) return 1;
     return wmemcmp(s1, s2, n);
 }
 
 /* ----------------------------------------------------------- _chk variants */
 
 static void chk_fail(const char *what) { tl_log_line("bionic: %s: buffer overflow detected", what); abort(); }
-static void *b___memcpy_chk(void *d, const void *s, size_t n, size_t dl) { if (!d || !s || !n) return d; if (n > dl) chk_fail("__memcpy_chk"); return memcpy(d, s, n); }
-static void *b___memmove_chk(void *d, const void *s, size_t n, size_t dl) { if (!d || !s || !n) return d; if (n > dl) chk_fail("__memmove_chk"); return memmove(d, s, n); }
-static void *b___memset_chk(void *d, int c, size_t n, size_t dl) { if (!d || !n) return d; if (n > dl) chk_fail("__memset_chk"); return memset(d, c, n); }
-static size_t b___strlen_chk(const char *s, size_t dl) { if (!s) return 0; size_t n = strlen(s); if (n >= dl) chk_fail("__strlen_chk"); return n; }
-static char *b___strchr_chk(const char *s, int c, size_t dl) { if (!s) return NULL; char *r = strchr(s, c); if (r && (size_t)(r - s) >= dl) chk_fail("__strchr_chk"); return r; }
+static void *b___memcpy_chk(void *d, const void *s, size_t n, size_t dl) { if (is_invalid_ptr(d) || is_invalid_ptr(s) || !n) return d; if (n > dl) chk_fail("__memcpy_chk"); return memcpy(d, s, n); }
+static void *b___memmove_chk(void *d, const void *s, size_t n, size_t dl) { if (is_invalid_ptr(d) || is_invalid_ptr(s) || !n) return d; if (n > dl) chk_fail("__memmove_chk"); return memmove(d, s, n); }
+static void *b___memset_chk(void *d, int c, size_t n, size_t dl) { if (is_invalid_ptr(d) || !n) return d; if (n > dl) chk_fail("__memset_chk"); return memset(d, c, n); }
+static size_t b___strlen_chk(const char *s, size_t dl) { if (is_invalid_ptr(s)) return 0; size_t n = strlen(s); if (n >= dl) chk_fail("__strlen_chk"); return n; }
+static char *b___strchr_chk(const char *s, int c, size_t dl) { if (is_invalid_ptr(s)) return NULL; char *r = strchr(s, c); if (r && (size_t)(r - s) >= dl) chk_fail("__strchr_chk"); return r; }
 static char *b___strncat_chk(char *d, const char *s, size_t n, size_t dl)
 {
-    if (!d) return d;
-    if (!s || !n) return d;
+    if (is_invalid_ptr(d)) return d;
+    if (is_invalid_ptr(s) || !n) return d;
     if (strlen(d) + (strnlen(s, n)) + 1 > dl) chk_fail("__strncat_chk");
     return strncat(d, s, n);
 }
 static char *b___strncpy_chk2(char *d, const char *s, size_t n, size_t dl, size_t sl)
 {
     (void)sl;
-    if (!d || !n) return d;
-    if (!s) { memset(d, 0, n); return d; }
+    if (is_invalid_ptr(d) || !n) return d;
+    if (is_invalid_ptr(s)) { memset(d, 0, n); return d; }
     if (n > dl) chk_fail("__strncpy_chk2");
     return strncpy(d, s, n);
 }

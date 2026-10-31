@@ -341,9 +341,16 @@ static void *launch_thread(void *arg)
         tl_log_line("java: starting %s as %s, %dx%d (runtime %s)", A.apk, A.package, A.width, A.height, g_java_root);
         ok = false;
         if (g_java_root[0]) {
-            pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 64u << 20);
+            pthread_attr_t at; pthread_attr_init(&at);
             pthread_t t;
-            if (pthread_create(&t, &at, java_boot, &ok) == 0) pthread_join(t, NULL);
+            int prc = -1;
+            size_t try_stacks[] = { 32u << 20, 16u << 20, 8u << 20, 4u << 20 };
+            for (int s = 0; s < 4 && prc != 0; s++) {
+                pthread_attr_setstacksize(&at, try_stacks[s]);
+                prc = pthread_create(&t, &at, java_boot, &ok);
+            }
+            if (prc == 0) pthread_join(t, NULL);
+            else tl_log_line("java: failed to spawn java_boot thread");
             pthread_attr_destroy(&at);
         } else tl_log_line("java: no runtime folder given");
         if (ok) {
