@@ -1028,6 +1028,40 @@ public class View implements Drawable.Callback, KeyEvent.Callback {
         if (mAnimation != null) { if (!mAnimTx.getMatrix().isIdentity()) c.concat(mAnimTx.getMatrix()); alpha *= mAnimTx.getAlpha(); }
         if (alpha <= 0.002f) { c.restoreToCount(save); return; }
         int w = getWidth(), h = getHeight();
+        float z = getZ();
+        if (z > 0.5f && w > 0 && h > 0 && alpha > 0.05f) {
+            Outline o = new Outline();
+            if (mOutlineProvider != null) {
+                mOutlineProvider.getOutline(this, o);
+            }
+            if (o.mRect == null && o.mPath == null) {
+                o.setRect(0, 0, w, h);
+            }
+            if (o.mAlpha > 0.05f) {
+                int ss = c.save();
+                Paint sp = new Paint();
+                float rad = Math.min(z * 1.5f, 24f);
+                float dy = Math.min(z * 0.5f, 12f);
+                int sc = ((int)(Math.min(1.0f, o.mAlpha) * 0x38)) << 24;
+                sp.setShadowLayer(rad, 0, dy, sc);
+                sp.setColor(0xFF000000);
+                if (o.mPath != null) {
+                    c.clipOutPath(o.mPath);
+                    c.drawPath(o.mPath, sp);
+                } else if (o.mRect != null) {
+                    if (o.mRadius > 0) {
+                        Path rp = new Path();
+                        rp.addRoundRect(new RectF(o.mRect), o.mRadius, o.mRadius, Path.Direction.CW);
+                        c.clipOutPath(rp);
+                        c.drawPath(rp, sp);
+                    } else {
+                        c.clipOutRect(o.mRect);
+                        c.drawRect(o.mRect, sp);
+                    }
+                }
+                c.restoreToCount(ss);
+            }
+        }
         if (parent.getClipChildren()) c.clipRect(0, 0, w, h);
         if (mClipBounds != null) c.clipRect(mClipBounds);
         if (getClipToOutline() && mOutlineProvider != null) {

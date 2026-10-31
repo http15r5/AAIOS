@@ -32,7 +32,7 @@ public interface WindowManager extends ViewManager {
         public static final int TITLE_CHANGED = 64, FLAGS_CHANGED = 4;
         public int x, y, type = TYPE_APPLICATION, flags, privateFlags, softInputMode, gravity, format, windowAnimations, layoutInDisplayCutoutMode,
             screenOrientation = -1, systemUiVisibility, rotationAnimation, preferredDisplayModeId, memoryType;
-        public float horizontalWeight, verticalWeight, horizontalMargin, verticalMargin, alpha = 1f, dimAmount = 1f, screenBrightness = -1f, buttonBrightness = -1f, preferredRefreshRate;
+        public float horizontalWeight, verticalWeight, horizontalMargin, verticalMargin, alpha = 1f, dimAmount = 0.6f, screenBrightness = -1f, buttonBrightness = -1f, preferredRefreshRate;
         public android.os.IBinder token;
         public String packageName;
         private CharSequence mTitle = "";

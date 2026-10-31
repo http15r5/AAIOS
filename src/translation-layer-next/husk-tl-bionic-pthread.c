@@ -200,6 +200,7 @@ static void *make_cond(uint32_t value)
 {
     (void)value;
     pthread_cond_t *c = malloc(sizeof(*c));
+    if (!c) return NULL;
     pthread_cond_init(c, NULL);
     return c;
 }

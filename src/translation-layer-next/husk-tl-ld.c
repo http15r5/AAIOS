@@ -1427,10 +1427,6 @@ static void patch_image(tl_lib *L, size_t *n_tpidr, size_t *n_adrp, size_t *n_ad
                  * Replacing the entry instruction with ret returns immediately to the caller with lr intact! */
                 w[i] = 0xD65F03C0u;                                /* ret */
                 tl_log_line("ld: %s: disarmed anti-tamper abort function entry at +%#llx", L->name, (unsigned long long)va);
-            } else if (i + 3 < nwords && insn == 0x52981bc9u && w[i + 1] == 0xaa1f03e8u && w[i + 2] == 0x72bbd5a9u && w[i + 3] == 0xb9000109u) {
-                /* Bedrock intentional suicide trap: mov w9, #0xc0de; mov x8, xzr; movk w9, #0xdead, lsl #16; str w9, [x8] (0xdeadc0de to NULL) */
-                w[i] = 0xD65F03C0u;                                /* ret */
-                tl_log_line("ld: %s: disarmed fatal assertion suicide trap at +%#llx", L->name, (unsigned long long)va);
             } else if (insn == 0xD61F0220u && i + 2 < nwords) {   /* br x17 */
                 uint64_t tgt = (uint64_t)w[i + 1] | ((uint64_t)w[i + 2] << 32);
                 if (tgt < 0x100000 && i > 0 && w[i - 1] == 0x58000051u) {
