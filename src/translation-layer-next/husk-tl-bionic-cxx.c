@@ -32,18 +32,6 @@ static void *b_new(size_t n)
     if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
     if (!p) p = calloc(1, sz);
     if (!p) {
-        void *ptr = NULL;
-        if (posix_memalign(&ptr, 16, (sz + 15) & ~15ul) == 0) p = ptr;
-    }
-    if (!p) {
-        size_t psz = (sz + 16 + 0x3FFF) & ~0x3FFFull;
-        void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
-        if (m != MAP_FAILED) {
-            *(size_t *)m = psz;
-            p = (void *)((uintptr_t)m + 16);
-        }
-    }
-    if (!p) {
         tl_log_line("cxx: operator new(%zu) failed out of memory", n);
         abort();
     }
@@ -56,18 +44,6 @@ static void *b_new_nothrow(size_t n, const void *nt)
     void *p = malloc(sz);
     if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
     if (!p) p = calloc(1, sz);
-    if (!p) {
-        void *ptr = NULL;
-        if (posix_memalign(&ptr, 16, (sz + 15) & ~15ul) == 0) p = ptr;
-    }
-    if (!p) {
-        size_t psz = (sz + 16 + 0x3FFF) & ~0x3FFFull;
-        void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
-        if (m != MAP_FAILED) {
-            *(size_t *)m = psz;
-            p = (void *)((uintptr_t)m + 16);
-        }
-    }
     return p;
 }
 static void *b_new_aligned(size_t n, size_t align)
@@ -90,28 +66,15 @@ static void *b_new_aligned_nothrow(size_t n, size_t align, const void *nt)
     if (posix_memalign(&p, align, sz) == 0 && p) return p;
     p = malloc(sz);
     if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
-    if (!p) p = b_new_nothrow(sz, NULL);
     return p;
 }
 static void b_delete(void *p)
 {
-    if (!p || (uintptr_t)p < 0x100000ull) return;
-    if (malloc_size(p) > 0) {
-        free(p);
-        return;
-    }
-    if (((uintptr_t)p & 0xF) == 0) {
-        void *m = (void *)((uintptr_t)p - 16);
-        size_t psz = *(size_t *)m;
-        if (psz >= 0x4000 && (psz & 0x3FFF) == 0 && psz < 0x40000000ull) {
-            munmap(m, psz);
-            return;
-        }
-    }
+    if (p) free(p);
 }
-static void b_delete_sized(void *p, size_t n) { (void)n; b_delete(p); }
-static void b_delete_aligned(void *p, size_t align) { (void)align; b_delete(p); }
-static void b_delete_sized_aligned(void *p, size_t n, size_t align) { (void)n; (void)align; b_delete(p); }
+static void b_delete_sized(void *p, size_t n) { (void)n; if (p) free(p); }
+static void b_delete_aligned(void *p, size_t align) { (void)align; if (p) free(p); }
+static void b_delete_sized_aligned(void *p, size_t n, size_t align) { (void)n; (void)align; if (p) free(p); }
 
 static void b_cxa_pure_virtual(void)
 {
