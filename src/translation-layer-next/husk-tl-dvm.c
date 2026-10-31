@@ -1414,6 +1414,7 @@ static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, 
             if (!strcmp(r->name, "invalidate") && !strcmp(r->sig, "()V")) { if (result) result->j = 0; return true; }
             if (!strcmp(r->name, "requestLayout") && !strcmp(r->sig, "()V")) { if (result) result->j = 0; return true; }
             if (!strcmp(r->name, "getAlpha") && !strcmp(r->sig, "()I")) { if (result) result->i = 255; return true; }
+            if (!strcmp(r->name, "refreshMessages") && !strcmp(r->sig, "()V")) { if (result) result->j = 0; return true; }
             return dvm_throw("java/lang/NullPointerException", "Attempt to invoke %s method '%s.%s%s' on a null object reference",
                                      kind == 4 ? "interface" : "virtual", r->cls->name, r->name, r->sig);
         }

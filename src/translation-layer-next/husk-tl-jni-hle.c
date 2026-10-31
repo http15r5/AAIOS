@@ -581,6 +581,7 @@ static void Reflection_newProxyInstance(tl_jcall *c)
     c->ret = vl(p);
 }
 static void Activity_getApplication(tl_jcall *c) { static jobj *app; if (!app) app = make("android/app/Application"); c->ret = vl(app); }
+static void AT_current(tl_jcall *c) { static jobj *at; if (!at) at = make("android/app/ActivityThread"); c->ret = vl(at); }
 static void Zero_int(tl_jcall *c) { c->ret = vi(0); }
 static void Unity_getNetworkConnectivity(tl_jcall *c) { c->ret = vi(2); }     /* ReachableViaLocalAreaNetwork: the phone has its network */
 
@@ -1018,6 +1019,9 @@ static const tl_jhle k_hle[] = {
     M("com/unity3d/player/ReflectionHelper", "newProxyInstance", "(Lcom/unity3d/player/UnityPlayer;JLjava/lang/Class;)Ljava/lang/Object;", Reflection_newProxyInstance),
     M("android/app/Activity", "getApplication", "()Landroid/app/Application;", Activity_getApplication),
     M("android/app/Activity", "getApplication", "()Ljava/lang/Object;", Activity_getApplication),
+    M("android/app/ActivityThread", "currentActivityThread", "()Landroid/app/ActivityThread;", AT_current),
+    M("android/app/ActivityThread", "currentApplication", "()Landroid/app/Application;", Activity_getApplication),
+    M("android/app/ActivityThread", "getApplication", "()Landroid/app/Application;", Activity_getApplication),
     M("com/dikra/diskutils/DiskUtils", "availableSpace", "(Z)I", DiskUtils_availableSpace),
     M("com/sybogames/chili/SidekickHelper", "getSidekickExperimentInfo", "()I", Zero_int),
     M("android/util/Log", "getStackTraceString", "(Ljava/lang/Throwable;)Ljava/lang/String;", Log_getStackTraceString),

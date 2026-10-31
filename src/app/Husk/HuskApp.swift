@@ -46,10 +46,21 @@ enum HuskOrientation {
             UIViewController.attemptRotationToDeviceOrientation()
             return
         }
+        let originalSelector = #selector(getter: UIViewController.supportedInterfaceOrientations)
+        let swizzledSelector = #selector(UIViewController.husk_supportedInterfaceOrientations)
+        let swiz = class_getInstanceMethod(UIViewController.self, swizzledSelector)
+        let swizImp = swiz.map { method_getImplementation($0) }
+        let swizTypes = swiz.flatMap { method_getTypeEncoding($0) }
         for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
             let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
             var vc = window?.rootViewController
-            while let v = vc { v.setNeedsUpdateOfSupportedInterfaceOrientations(); vc = v.presentedViewController }
+            while let v = vc {
+                if let imp = swizImp, let types = swizTypes {
+                    class_replaceMethod(type(of: v), originalSelector, imp, types)
+                }
+                v.setNeedsUpdateOfSupportedInterfaceOrientations()
+                vc = v.presentedViewController
+            }
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: new)) { error in
                 HuskLog.log("ui", "orientation change refused (attempt \(attempt + 1)): \(error.localizedDescription)")
                 guard attempt < 5 else { return }

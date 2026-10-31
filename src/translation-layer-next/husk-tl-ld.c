@@ -1421,6 +1421,12 @@ static void patch_image(tl_lib *L, size_t *n_tpidr, size_t *n_adrp, size_t *n_ad
                     if (adr_stub(L, pc, insn & 0x1Fu, data_view(L, (const void *)tp), &branch)) { w[i] = branch; (*n_adr)++; }
                     else L->n_adr_failed++;
                 }
+            } else if (i + 2 < nwords && insn == 0xF90003BFu && w[i + 1] == 0xD2800561u && w[i + 2] == 0xF90007A1u) {
+                /* ByteDance anti-tamper abort function entry: str xzr, [sp]; mov x1, #43; str x1, [sp, #8].
+                 * If allowed to run, it clears lr (x30) and jumps to x17=0x4000.
+                 * Replacing the entry instruction with ret returns immediately to the caller with lr intact! */
+                w[i] = 0xD65F03C0u;                                /* ret */
+                tl_log_line("ld: %s: disarmed anti-tamper abort function entry at +%#llx", L->name, (unsigned long long)va);
             } else if (insn == 0xD61F0220u && i + 2 < nwords) {   /* br x17 */
                 uint64_t tgt = (uint64_t)w[i + 1] | ((uint64_t)w[i + 2] << 32);
                 if (tgt < 0x100000 && i > 0 && w[i - 1] == 0x58000051u) {

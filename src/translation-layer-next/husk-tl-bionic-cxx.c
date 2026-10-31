@@ -117,12 +117,7 @@ static void b_delete(void *p)
             }
         }
     }
-    malloc_zone_t *z = malloc_zone_from_ptr(p);
-    if (z) {
-        malloc_zone_free(z, p);
-    } else if (malloc_size(p) > 0) {
-        free(p);
-    }
+    free(p);
 }
 static void b_delete_sized(void *p, size_t n) { (void)n; b_delete(p); }
 static void b_delete_aligned(void *p, size_t align) { (void)align; b_delete(p); }

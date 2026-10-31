@@ -668,7 +668,9 @@ static int b_AAsset_isAllocated(tl_asset *a) { return a && a->owned != NULL; }
 bool tl_assetstream_stored(const char *name, int *fd, int64_t *off, int64_t *len);
 static int b_AAsset_openFileDescriptor64(tl_asset *a, int64_t *start, int64_t *len)
 {
-    int fd; int64_t o, l;
+    if (start) *start = 0;
+    if (len) *len = 0;
+    int fd; int64_t o = 0, l = 0;
     if (!a || !a->name[0] || !tl_assetstream_stored(a->name, &fd, &o, &l)) return -1;
     if (start) *start = o;
     if (len) *len = l;
@@ -676,6 +678,8 @@ static int b_AAsset_openFileDescriptor64(tl_asset *a, int64_t *start, int64_t *l
 }
 static int b_AAsset_openFileDescriptor(tl_asset *a, long *start, long *len)
 {
+    if (start) *start = 0;
+    if (len) *len = 0;
     int64_t o = 0, l = 0; int fd = b_AAsset_openFileDescriptor64(a, &o, &l);
     if (fd >= 0) { if (start) *start = (long)o; if (len) *len = (long)l; }
     return fd;
