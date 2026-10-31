@@ -39,25 +39,41 @@ static void *b_new(size_t n)
     size_t sz = n ? n : 1;
     void *p = malloc(sz);
     if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
+    if (!p) p = calloc(1, sz);
+    if (!p) {
+        vm_address_t *zones = NULL;
+        unsigned count = 0;
+        if (malloc_get_all_zones(mach_task_self(), 0, &zones, &count) == KERN_SUCCESS && zones) {
+            for (unsigned i = 0; i < count && !p; i++) {
+                malloc_zone_t *z = (malloc_zone_t *)zones[i];
+                if (z && z->malloc) p = z->malloc(z, sz);
+            }
+        }
+    }
     if (!p) {
         void *ptr = NULL;
         if (posix_memalign(&ptr, 16, (sz + 15) & ~15ul) == 0) p = ptr;
     }
     if (!p) {
-        size_t psz = (sz + sizeof(husk_mmap_hdr_t) + 0x3FFF) & ~0x3FFFull;
-        void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
-        if (m != MAP_FAILED) {
-            husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)m;
-            hdr->magic = HUSK_MMAP_MAGIC;
-            hdr->size = psz;
-            p = (void *)(hdr + 1);
+        for (int retries = 0; retries < 10 && !p; retries++) {
+            sched_yield();
+            p = malloc(sz);
+            if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
+            if (!p) p = calloc(1, sz);
         }
     }
     if (!p) {
-        vm_address_t addr = 0;
         size_t psz = (sz + sizeof(husk_mmap_hdr_t) + 0x3FFF) & ~0x3FFFull;
-        if (vm_allocate(mach_task_self(), &addr, psz, VM_FLAGS_ANYWHERE) == KERN_SUCCESS) {
-            husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)addr;
+        if (psz < 0x40000) psz = 0x40000;
+        void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+        if (m == MAP_FAILED) {
+            vm_address_t addr = 0;
+            if (vm_allocate(mach_task_self(), &addr, psz, VM_FLAGS_ANYWHERE) == KERN_SUCCESS) {
+                m = (void *)addr;
+            }
+        }
+        if (m && m != MAP_FAILED) {
+            husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)m;
             hdr->magic = HUSK_MMAP_MAGIC;
             hdr->size = psz;
             p = (void *)(hdr + 1);
@@ -75,25 +91,41 @@ static void *b_new_nothrow(size_t n, const void *nt)
     size_t sz = n ? n : 1;
     void *p = malloc(sz);
     if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
+    if (!p) p = calloc(1, sz);
+    if (!p) {
+        vm_address_t *zones = NULL;
+        unsigned count = 0;
+        if (malloc_get_all_zones(mach_task_self(), 0, &zones, &count) == KERN_SUCCESS && zones) {
+            for (unsigned i = 0; i < count && !p; i++) {
+                malloc_zone_t *z = (malloc_zone_t *)zones[i];
+                if (z && z->malloc) p = z->malloc(z, sz);
+            }
+        }
+    }
     if (!p) {
         void *ptr = NULL;
         if (posix_memalign(&ptr, 16, (sz + 15) & ~15ul) == 0) p = ptr;
     }
     if (!p) {
-        size_t psz = (sz + sizeof(husk_mmap_hdr_t) + 0x3FFF) & ~0x3FFFull;
-        void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
-        if (m != MAP_FAILED) {
-            husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)m;
-            hdr->magic = HUSK_MMAP_MAGIC;
-            hdr->size = psz;
-            p = (void *)(hdr + 1);
+        for (int retries = 0; retries < 10 && !p; retries++) {
+            sched_yield();
+            p = malloc(sz);
+            if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
+            if (!p) p = calloc(1, sz);
         }
     }
     if (!p) {
-        vm_address_t addr = 0;
         size_t psz = (sz + sizeof(husk_mmap_hdr_t) + 0x3FFF) & ~0x3FFFull;
-        if (vm_allocate(mach_task_self(), &addr, psz, VM_FLAGS_ANYWHERE) == KERN_SUCCESS) {
-            husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)addr;
+        if (psz < 0x40000) psz = 0x40000;
+        void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+        if (m == MAP_FAILED) {
+            vm_address_t addr = 0;
+            if (vm_allocate(mach_task_self(), &addr, psz, VM_FLAGS_ANYWHERE) == KERN_SUCCESS) {
+                m = (void *)addr;
+            }
+        }
+        if (m && m != MAP_FAILED) {
+            husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)m;
             hdr->magic = HUSK_MMAP_MAGIC;
             hdr->size = psz;
             p = (void *)(hdr + 1);
@@ -234,11 +266,30 @@ static int rlimit_to_darwin(int r)
 }
 static int b_getrlimit(int res, uint64_t *out)
 {
+    if (!out) { tl_set_guest_errno(22); return -1; }
+    if (res == 2 /* RLIMIT_DATA */ || res == 5 /* RLIMIT_RSS */ || res == 8 /* RLIMIT_MEMLOCK */ || res == 9 /* RLIMIT_AS */) {
+        out[0] = ~0ull;
+        out[1] = ~0ull;
+        return 0;
+    }
     struct rlimit rl; int d = rlimit_to_darwin(res);
     if (d < 0) { tl_set_guest_errno(22); return -1; }
     TL_ERRNO_BEGIN(); int r = getrlimit(d, &rl); TL_ERRNO_END();
     if (r == 0) { out[0] = rl.rlim_cur == RLIM_INFINITY ? ~0ull : rl.rlim_cur; out[1] = rl.rlim_max == RLIM_INFINITY ? ~0ull : rl.rlim_max; }
     return r;
+}
+static int b_prlimit64(int pid, int resource, const uint64_t *new_limit, uint64_t *old_limit)
+{
+    (void)pid; (void)new_limit;
+    if (old_limit) {
+        if (resource == 2 /* RLIMIT_DATA */ || resource == 5 /* RLIMIT_RSS */ || resource == 8 /* RLIMIT_MEMLOCK */ || resource == 9 /* RLIMIT_AS */) {
+            old_limit[0] = ~0ull;
+            old_limit[1] = ~0ull;
+            return 0;
+        }
+        return b_getrlimit(resource, old_limit);
+    }
+    return 0;
 }
 static int b_setrlimit(int res, const uint64_t *in)
 {
@@ -285,7 +336,7 @@ static size_t b_malloc_usable_size(void *p) { return p ? malloc_size(p) : 0; }
 
 
 const tl_bionic_entry tl_tab_cxx[] = {
-    TL_WRAP("getrlimit", b_getrlimit), TL_WRAP("setrlimit", b_setrlimit), TL_WRAP("getrusage", b_getrusage),
+    TL_WRAP("getrlimit", b_getrlimit), TL_WRAP("setrlimit", b_setrlimit), TL_WRAP("prlimit", b_prlimit64), TL_WRAP("prlimit64", b_prlimit64), TL_WRAP("getrusage", b_getrusage),
     TL_WRAP("sched_get_priority_max", b_sched_get_priority_max), TL_WRAP("sched_get_priority_min", b_sched_get_priority_min),
     TL_WRAP("pthread_setschedparam", b_pthread_setschedparam), TL_WRAP("pthread_getschedparam", b_pthread_getschedparam),
     TL_WRAP("pthread_attr_setschedparam", b_pthread_attr_setschedparam), TL_WRAP("pthread_gettid_np", b_pthread_gettid_np),

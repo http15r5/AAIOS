@@ -228,15 +228,21 @@ static CTFontRef font_with_cascade(CTFontRef f)
         CFRelease(sys);
     }
 
-    /* Also explicitly append AppleColorEmoji */
-    CTFontRef emoji = CTFontCreateWithName(CFSTR("AppleColorEmoji"), 0.0, NULL);
-    if (emoji) {
-        CTFontDescriptorRef ed = CTFontCopyFontDescriptor(emoji);
-        if (ed) {
-            CFArrayAppendValue(mutCascade, ed);
-            CFRelease(ed);
+    /* Also explicitly append AppleColorEmoji, Apple Symbols, Symbol, SF Pro, Geneva, Menlo */
+    static const CFStringRef fallbackNames[] = {
+        CFSTR("AppleColorEmoji"),
+        CFSTR(".AppleSystemUIFont"),
+        CFSTR("Apple Symbols"),
+        CFSTR("Symbol"),
+        CFSTR("Geneva"),
+        CFSTR("Menlo")
+    };
+    for (size_t i = 0; i < sizeof(fallbackNames) / sizeof(fallbackNames[0]); i++) {
+        CTFontDescriptorRef desc = CTFontDescriptorCreateWithNameAndSize(fallbackNames[i], 0.0);
+        if (desc) {
+            CFArrayAppendValue(mutCascade, desc);
+            CFRelease(desc);
         }
-        CFRelease(emoji);
     }
 
     CTFontDescriptorRef baseDesc = CTFontCopyFontDescriptor(f);

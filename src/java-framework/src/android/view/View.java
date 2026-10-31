@@ -1033,33 +1033,34 @@ public class View implements Drawable.Callback, KeyEvent.Callback {
             Outline o = new Outline();
             if (mOutlineProvider != null) {
                 mOutlineProvider.getOutline(this, o);
-            }
-            if (o.mRect == null && o.mPath == null) {
+            } else if (mBackground != null && getElevation() > 0) {
                 o.setRect(0, 0, w, h);
             }
-            if (o.mAlpha > 0.05f) {
-                int ss = c.save();
-                Paint sp = new Paint();
-                float rad = Math.min(z * 1.5f, 24f);
-                float dy = Math.min(z * 0.5f, 12f);
-                int sc = ((int)(Math.min(1.0f, o.mAlpha) * 0x38)) << 24;
-                sp.setShadowLayer(rad, 0, dy, sc);
-                sp.setColor(0xFF000000);
-                if (o.mPath != null) {
-                    c.clipOutPath(o.mPath);
-                    c.drawPath(o.mPath, sp);
-                } else if (o.mRect != null) {
-                    if (o.mRadius > 0) {
-                        Path rp = new Path();
-                        rp.addRoundRect(new RectF(o.mRect), o.mRadius, o.mRadius, Path.Direction.CW);
-                        c.clipOutPath(rp);
-                        c.drawPath(rp, sp);
-                    } else {
-                        c.clipOutRect(o.mRect);
-                        c.drawRect(o.mRect, sp);
+            if ((o.mRect != null || o.mPath != null) && o.mAlpha > 0.05f) {
+                if (o.mRect == null || (o.mRect.width() > 0 && o.mRect.height() > 0)) {
+                    int ss = c.save();
+                    Paint sp = new Paint();
+                    float rad = Math.min(z * 1.5f, 24f);
+                    float dy = Math.min(z * 0.5f, 12f);
+                    int sc = ((int)(Math.min(1.0f, o.mAlpha) * 0x38)) << 24;
+                    sp.setShadowLayer(rad, 0, dy, sc);
+                    sp.setColor(0xFF000000);
+                    if (o.mPath != null) {
+                        c.clipOutPath(o.mPath);
+                        c.drawPath(o.mPath, sp);
+                    } else if (o.mRect != null) {
+                        if (o.mRadius > 0) {
+                            Path rp = new Path();
+                            rp.addRoundRect(new RectF(o.mRect), o.mRadius, o.mRadius, Path.Direction.CW);
+                            c.clipOutPath(rp);
+                            c.drawPath(rp, sp);
+                        } else {
+                            c.clipOutRect(o.mRect);
+                            c.drawRect(o.mRect, sp);
+                        }
                     }
+                    c.restoreToCount(ss);
                 }
-                c.restoreToCount(ss);
             }
         }
         if (parent.getClipChildren()) c.clipRect(0, 0, w, h);
