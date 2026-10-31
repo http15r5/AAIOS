@@ -200,7 +200,7 @@ public final class ViewRoot implements ViewParent {
         sScheduled = false;
         ArrayList<ViewRoot> roots = new ArrayList<>(sRoots);
         for (ViewRoot r : roots) if (!r.mRemoved) r.performLayout();
-        for (ViewRoot r : roots) if (!r.mRemoved && r.mObserver.dispatchOnPreDraw()) { scheduleFrame(); }
+        for (ViewRoot r : roots) if (!r.mRemoved && r.mObserver.dispatchOnPreDraw()) { scheduleFrame(); return; }
         drawAll(roots);
         for (ViewRoot r : roots) if (!r.mRemoved) r.mObserver.dispatchOnDraw();
     }

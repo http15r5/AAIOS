@@ -322,7 +322,17 @@ NAT(N_externalDir) { (void)self; (void)a; *ret = L(jstr(A.ext)); return true; }
 NAT(N_packageName) { (void)self; (void)a; *ret = L(jstr(A.pkg)); return true; }
 NAT(N_screenWidth) { (void)self; (void)a; *ret = I(A.cfg.width); return true; }
 NAT(N_screenHeight) { (void)self; (void)a; *ret = I(A.cfg.height); return true; }
-NAT(N_density) { (void)self; (void)a; *ret = F(A.cfg.density > 0 ? A.cfg.density : 3.0f); return true; }
+NAT(N_density)
+{
+    (void)self; (void)a;
+    float d = A.cfg.density;
+    if (d <= 0.0f) {
+        int min_dim = (A.cfg.width > 0 && A.cfg.height > 0) ? (A.cfg.width < A.cfg.height ? A.cfg.width : A.cfg.height) : 0;
+        d = (min_dim > 0 && min_dim < 1000) ? ((float)min_dim / 392.0f) : 3.0f;
+    }
+    *ret = F(d);
+    return true;
+}
 NAT(N_requestRender) { (void)self; (void)a; (void)ret; atomic_store(&A.render_requested, true); return true; }
 NAT(N_setContentView) { (void)self; (void)ret; A.content = a[0].l; return true; }
 NAT(N_vibrate) { (void)self; (void)a; (void)ret; if (A.cfg.vibrate) A.cfg.vibrate((int)a[0].j); return true; }

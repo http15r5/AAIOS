@@ -1761,8 +1761,21 @@ static long linux_syscall_impl(long a0, long a1, long a2, long a3, long a4, long
     case 283: return 0;                                                                 /* membarrier */
     case 134: case 135: return 0;                                                       /* rt_sigaction, rt_sigprocmask: accepted */
     case 233: return 0;                                                                 /* madvise */
-    case 122: case 123: return 0;                                                       /* sched_setaffinity / getaffinity */
-    case 167: return 0;                                                                 /* prctl */
+    case 122: return 0;                                                                 /* sched_setaffinity */
+    case 123: {                                                                         /* sched_getaffinity */
+        if (a2 && a1 > 0) {
+            size_t sz = (size_t)a1;
+            memset((void *)a2, 0, sz);
+            long n = sysconf(_SC_NPROCESSORS_ONLN);
+            if (n <= 0) n = 6;
+            for (long i = 0; i < n && (size_t)(i / 8) < sz; i++) ((uint8_t *)a2)[i / 8] |= (uint8_t)(1u << (i % 8));
+        }
+        return 0;
+    }
+    case 167: {                                                                         /* prctl */
+        extern int bionic_prctl(int, unsigned long, unsigned long, unsigned long, unsigned long);
+        return bionic_prctl((int)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3, (unsigned long)a4);
+    }
     case 160: { int tl_bionic_uname(void *); return tl_bionic_uname((void *)a0); }    /* uname: filled in, as the libc call is */
     case 47: {                                                                          /* fallocate */
         int r = b_fallocate((int)a0, (int)a1, (off_t)a2, (off_t)a3);

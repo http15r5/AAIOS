@@ -739,6 +739,18 @@ static bool fake_command(char **argv, int argc, char *out, size_t n, int *code)
     if (!strcmp(prog, "true")) return true;
     if (!strcmp(prog, "false")) { *code = 1; return true; }
     if (!strcmp(prog, "which") || !strcmp(prog, "su")) { *code = 1; return true; }        /* nothing found; not rooted */
+    if (!strcmp(prog, "netcfg")) {
+        snprintf(out, n, "lo       UP                             127.0.0.1/8   0x00000049 00:00:00:00:00:00\nwlan0    UP                            192.168.1.100/24  0x00001043 00:11:22:33:44:55\n");
+        return true;
+    }
+    if (!strcmp(prog, "ifconfig")) {
+        snprintf(out, n, "wlan0     Link encap:Ethernet  HWaddr 00:11:22:33:44:55\n          inet addr:192.168.1.100  Bcast:192.168.1.255  Mask:255.255.255.0\n          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1\n");
+        return true;
+    }
+    if (!strcmp(prog, "ip")) {
+        snprintf(out, n, "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN\n    inet 127.0.0.1/8 scope host lo\n2: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP\n    inet 192.168.1.100/24 brd 192.168.1.255 scope global wlan0\n");
+        return true;
+    }
     return false;
 }
 NAT(UNIXProcess_forkAndExec)
@@ -796,7 +808,8 @@ static void *thread_main(void *p)
     t_thread = t;
     jvalue nm; dvm_class *c = dvm_class_of(dvm_object_class(t));
     dvm_field *nf = c ? dvm_find_field(c, "name", false) : NULL;
-    if (nf && t->fields) { nm = t->fields[nf->slot]; const char *n = tl_jni_string(nm.l); if (n) pthread_setname_np(n); }
+    if (nf && t->fields) { nm = t->fields[nf->slot]; const char *n = tl_jni_string(nm.l); if (n && n[0]) pthread_setname_np(n); else pthread_setname_np("dvm-worker"); }
+    else pthread_setname_np("dvm-worker");
     dvm_method *run = dvm_find_virtual(dvm_object_class(t), "run", "()V");
     jvalue r;
     if (run && !dvm_call(run, t, NULL, &r)) {

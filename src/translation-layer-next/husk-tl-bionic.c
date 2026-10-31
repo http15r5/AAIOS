@@ -612,7 +612,7 @@ static int bionic_sched_setaffinity(int pid, size_t size, const void *mask) { (v
 static int bionic_sched_getparam(int pid, int *param) { (void)pid; if (param) *param = 0; return 0; }
 static int bionic_sched_getscheduler(int pid) { (void)pid; return 0; }
 
-static int bionic_prctl(int option, unsigned long a2, unsigned long a3, unsigned long a4, unsigned long a5)
+int bionic_prctl(int option, unsigned long a2, unsigned long a3, unsigned long a4, unsigned long a5)
 {
     (void)a3; (void)a4; (void)a5;
     switch (option) {

@@ -29,7 +29,10 @@
 #include "husk-tl-bionic.h"
 #include "husk-tl-dexindex.h"
 #include "husk-tl-gameactivity.h"
+#include "husk-tl-internal.h"
 #include "husk-tl-ld.h"
+#include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/ImageIO.h>
 
 static struct {
     char pkg[128], apk[1024], data[512], files[600], ext[700], prefs[700];
@@ -423,6 +426,95 @@ static void Ecdsa_sign(tl_jcall *c)
     c->ret = vl(a);
 }
 
+static void MA_getImageData(tl_jcall *c)
+{
+    jobj *str = c->args[0].l;
+    const char *p = str ? tl_jni_string(str) : NULL;
+    CGImageRef img = NULL;
+    if (p && p[0]) {
+        CFStringRef cf = CFStringCreateWithCString(NULL, p, kCFStringEncodingUTF8);
+        if (cf) {
+            CFURLRef url = CFURLCreateWithFileSystemPath(NULL, cf, kCFURLPOSIXPathStyle, false);
+            if (url) {
+                CGImageSourceRef isrc = CGImageSourceCreateWithURL(url, NULL);
+                if (isrc) {
+                    img = CGImageSourceCreateImageAtIndex(isrc, 0, NULL);
+                    CFRelease(isrc);
+                }
+                CFRelease(url);
+            }
+            CFRelease(cf);
+        }
+        if (!img && p[0] != '/' && M.data[0]) {
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/%s", M.data, p);
+            cf = CFStringCreateWithCString(NULL, path, kCFStringEncodingUTF8);
+            if (cf) {
+                CFURLRef url = CFURLCreateWithFileSystemPath(NULL, cf, kCFURLPOSIXPathStyle, false);
+                if (url) {
+                    CGImageSourceRef isrc = CGImageSourceCreateWithURL(url, NULL);
+                    if (isrc) {
+                        img = CGImageSourceCreateImageAtIndex(isrc, 0, NULL);
+                        CFRelease(isrc);
+                    }
+                    CFRelease(url);
+                }
+                CFRelease(cf);
+            }
+        }
+        if (!img && M.apk[0]) {
+            tl_zip z; char err[160];
+            if (tl_zip_open(&z, M.apk, err, sizeof(err))) {
+                char apath[512];
+                snprintf(apath, sizeof(apath), "assets/%s", p[0] == '/' ? p + 1 : p);
+                const tl_zip_entry *ze = tl_zip_find(&z, apath);
+                if (!ze && p[0] != '/') ze = tl_zip_find(&z, p);
+                const uint8_t *b = NULL; size_t blen = 0; bool owned = false;
+                if (ze && tl_zip_data(&z, ze, 16u << 20, &b, &blen, &owned, err, sizeof(err)) && b && blen) {
+                    CFDataRef d = CFDataCreate(NULL, b, (CFIndex)blen);
+                    if (d) {
+                        CGImageSourceRef isrc = CGImageSourceCreateWithData(d, NULL);
+                        if (isrc) {
+                            img = CGImageSourceCreateImageAtIndex(isrc, 0, NULL);
+                            CFRelease(isrc);
+                        }
+                        CFRelease(d);
+                    }
+                    if (owned) free((void *)b);
+                }
+                tl_zip_close(&z);
+            }
+        }
+    }
+    if (!img) {
+        jobj *arr = tl_jni_new_prim_array('I', 2);
+        c->ret = vl(arr);
+        return;
+    }
+    size_t w = CGImageGetWidth(img);
+    size_t h = CGImageGetHeight(img);
+    size_t npix = w * h;
+    jobj *arr = tl_jni_new_prim_array('I', (uint32_t)(npix + 2));
+    if (!arr) {
+        CGImageRelease(img);
+        c->ret = vl(tl_jni_new_prim_array('I', 2));
+        return;
+    }
+    int32_t *data = (int32_t *)arr->arr.data;
+    data[0] = (int32_t)w;
+    data[1] = (int32_t)h;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(data + 2, w, h, 8, w * 4, cs,
+                                             kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    if (ctx) {
+        CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), img);
+        CGContextRelease(ctx);
+    }
+    CGColorSpaceRelease(cs);
+    CGImageRelease(img);
+    c->ret = vl(arr);
+}
+
 /* ------------------------------------------------------------- class loader */
 
 /*
@@ -526,6 +618,8 @@ static const tl_jhle k_hle[] = {
     M_(MAIN, "isTTSEnabled", "()Z", RetFalse), M_(MAIN, "isTTSInstalled", "()Z", RetFalse), M_(MAIN, "isTextToSpeechInProgress", "()Z", RetFalse),
     M_(MAIN, "supportsTTSLanguage", "(Ljava/lang/String;)Z", RetFalse),
     M_(MAIN, "getBrazeManager", "()Lcom/mojang/minecraftpe/BrazeManager;", MA_brazeManager),
+    M_(MAIN, "getImageData", "(Ljava/lang/String;)[I", MA_getImageData),
+    M_(MAIN, "getImageData", "(Ljava/lang/String;Z)[I", MA_getImageData),
     M_(MAIN, "setTTSLanguage", "(Ljava/lang/String;)V", Noop),
     M_(MAIN, "stopTextToSpeech", "()V", Noop),
 
@@ -626,4 +720,6 @@ void tl_mc_set_activity(jobj *activity)
     jvalue v; v.j = 0; v.l = activity;
     tl_jni_set_static("com/mojang/minecraftpe/MainActivity", "mInstance", "Lcom/mojang/minecraftpe/MainActivity;", v);
     tl_jni_set_static("com/mojang/minecraftpe/MainActivity", "mHasStoragePermission", "Z", vz(1));
+    jobj *bm = make("com/mojang/minecraftpe/BrazeManager");
+    if (bm) tl_jni_set_field(activity, "mBrazeManager", "Lcom/mojang/minecraftpe/BrazeManager;", vl(bm));
 }
