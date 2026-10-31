@@ -372,17 +372,6 @@ static void *b_memchr(const void *s, int c, size_t n)
     return memchr(s, c, n);
 }
 
-static void *b_memrchr(const void *s, int c, size_t n)
-{
-    if (is_invalid_ptr(s) || !n) return NULL;
-    const unsigned char *p = (const unsigned char *)s + n;
-    while (n--) {
-        p--;
-        if (*p == (unsigned char)c) return (void *)p;
-    }
-    return NULL;
-}
-
 static int b_memcmp(const void *s1, const void *s2, size_t n)
 {
     if (!n || s1 == s2) return 0;
@@ -666,6 +655,7 @@ static int b_fe_ok(void) { return 0; }
 
 static void *b_memrchr(const void *s, int c, size_t n)
 {
+    if (is_invalid_ptr(s) || !n) return NULL;
     const unsigned char *p = (const unsigned char *)s + n;
     while (n--) if (*--p == (unsigned char)c) return (void *)p;
     return NULL;
