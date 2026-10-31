@@ -708,6 +708,27 @@ static int b_ftruncate(int fd, long n) { TL_ERRNO_BEGIN(); int r = ftruncate(fd,
 static int b_truncate(const char *p, long n) { char b[1024]; TL_ERRNO_BEGIN(); int r = truncate(tl_path_resolve(p, b, sizeof(b)), n); TL_ERRNO_END(); return r; }
 static int b_isatty(int fd) { int r = isatty(fd); if (!r) tl_set_guest_errno(25); return r; }
 static int b_flock(int fd, int op) { TL_ERRNO_BEGIN(); int r = flock(fd, op); TL_ERRNO_END(); return r; }
+static int b_fallocate(int fd, int mode, off_t off, off_t len)
+{
+    if (fd < 0 || off < 0 || len < 0) { tl_set_guest_errno(22); return -1; }
+    if (mode != 0) { tl_set_guest_errno(95); return -1; }
+    struct stat st;
+    if (fstat(fd, &st) < 0) { tl_set_guest_errno(errno); return -1; }
+    if (off + len > st.st_size) {
+        if (ftruncate(fd, off + len) < 0) { tl_set_guest_errno(errno); return -1; }
+    }
+    return 0;
+}
+static int b_posix_fallocate(int fd, off_t off, off_t len)
+{
+    if (fd < 0 || off < 0 || len < 0) return 22;
+    struct stat st;
+    if (fstat(fd, &st) < 0) return errno;
+    if (off + len > st.st_size) {
+        if (ftruncate(fd, off + len) < 0) return errno;
+    }
+    return 0;
+}
 
 #define PATH1(rt, name, call) \
     static rt b_##name(const char *p) { char b[1024]; TL_ERRNO_BEGIN(); rt r = call(tl_path_resolve(p, b, sizeof(b))); TL_ERRNO_END(); return r; }
@@ -1360,6 +1381,9 @@ static int b_mprotect(void *a, size_t l, int prot)
     /* Code a hooking library is about to patch: its permissions stay as they are, and its stores are carried out through
      * the writable view as they fault (husk-tl-codewrite.c). */
     if (tl_codewrite_enabled() && tl_xmem_contains(a)) { mm_trace("mprotect", a, l, prot, 0); return 0; }
+    size_t real = phantom_clamp((uintptr_t)a, l);
+    if (real == 0) { mm_trace("mprotect", a, l, prot, 0); return 0; }
+    l = real;
     if (prot & PROT_EXEC) {
         /* the host's own code (a guest that patches "the linker", which here is Apple's): never touched */
         Dl_info di;
@@ -1407,6 +1431,9 @@ static int b_mprotect(void *a, size_t l, int prot)
 static int b_madvise(void *a, size_t l, int adv)
 {
     mm_trace("madvise", a, l, adv, 0);
+    size_t real = phantom_clamp((uintptr_t)a, l);
+    if (real == 0) return 0;
+    l = real;
     if (adv == 4) { anon_zap((uintptr_t)a, l); return 0; }  /* MADV_DONTNEED: zero-fill on next touch */
     return 0;                                                /* the rest are hints */
 }
@@ -1737,12 +1764,9 @@ static long linux_syscall_impl(long a0, long a1, long a2, long a3, long a4, long
     case 122: case 123: return 0;                                                       /* sched_setaffinity / getaffinity */
     case 167: return 0;                                                                 /* prctl */
     case 160: { int tl_bionic_uname(void *); return tl_bionic_uname((void *)a0); }    /* uname: filled in, as the libc call is */
-    case 47: {                                                                          /* fallocate: growing the file (Superpack maps it at its full size, then writes) */
-        if (a1) return -95;
-        struct stat st;
-        if (fstat((int)a0, &st)) return -tl_errno_to_guest(errno);
-        if (st.st_size >= a2 + a3) return 0;
-        return ftruncate((int)a0, a2 + a3) ? -tl_errno_to_guest(errno) : 0;
+    case 47: {                                                                          /* fallocate */
+        int r = b_fallocate((int)a0, (int)a1, (off_t)a2, (off_t)a3);
+        return r < 0 ? -*tl_guest_errno_ptr() : 0;
     }
     case 48: {                                                                          /* faccessat: only AT_FDCWD */
         if ((int)a0 != -100) return -38;
@@ -1868,6 +1892,7 @@ const tl_bionic_entry tl_tab_io[] = {
     TL_WRAP("eventfd_write", b_eventfd_write), TL_WRAP("eventfd_read", b_eventfd_read), TL_WRAP("setmntent", b_setmntent),
     TL_WRAP("getmntent", b_getmntent), TL_WRAP("getmntent_r", b_getmntent_r), TL_WRAP("endmntent", b_endmntent),
     TL_WRAP("ftruncate", b_ftruncate), TL_WRAP("ftruncate64", b_ftruncate), TL_WRAP("truncate", b_truncate), TL_WRAP("isatty", b_isatty), TL_WRAP("flock", b_flock),
+    TL_WRAP("fallocate", b_fallocate), TL_WRAP("fallocate64", b_fallocate), TL_WRAP("posix_fallocate", b_posix_fallocate), TL_WRAP("posix_fallocate64", b_posix_fallocate),
     TL_WRAP("unlink", b_unlink), TL_WRAP("rmdir", b_rmdir), TL_WRAP("mkdir", b_mkdir), TL_WRAP("access", b_access),
     TL_WRAP("chmod", b_chmod), TL_WRAP("fchmod", b_fchmod), TL_WRAP("link", b_link), TL_WRAP("symlink", b_symlink),
     TL_WRAP("readlink", b_readlink), TL_WRAP("realpath", b_realpath), TL_WRAP("getcwd", b_getcwd), TL_WRAP("__getcwd_chk", b___getcwd_chk),

@@ -263,10 +263,11 @@ static tl_jclass *g_string_class;
 jobj *tl_dvm_string_u16(const uint16_t *s, int32_t n)
 {
     jobj *o = tl_jni_new_string("");
+    if (!o) return NULL;
     free(o->str.utf8);
     o->str.utf8 = u16_to_utf8(s, n);
     o->str.u16 = malloc((size_t)(n ? n : 1) * 2);
-    if (n) memcpy(o->str.u16, s, (size_t)n * 2);
+    if (n && o->str.u16) memcpy(o->str.u16, s, (size_t)n * 2);
     o->str.len16 = n;
     o->refs = 1u << 30;
     if (g_string_class) { o->cls = g_string_class; dvm_slots(o); }
@@ -276,6 +277,7 @@ jobj *tl_dvm_string_u16(const uint16_t *s, int32_t n)
 jobj *dvm_new_string_utf8(const char *s)
 {
     jobj *o = tl_jni_new_string(s);
+    if (!o) return NULL;
     o->refs = 1u << 30;
     if (g_string_class) { o->cls = g_string_class; dvm_slots(o); }
     return o;
@@ -618,12 +620,14 @@ static tl_jclass *g_class_class;
 
 jvalue *dvm_slots(jobj *o)
 {
+    if (!o || (uintptr_t)o < 0x1000ull) return NULL;
     if (o->fields) return o->fields;
     tl_jclass *jc = o->kind == TL_K_CLASS ? g_class_class : o->cls;
     dvm_class *c = dvm_class_of(jc);
     uint32_t n = c ? c->nslots : 0;
     if (!n) n = 1;
     jvalue *f = calloc(n, sizeof(jvalue));
+    if (!f) return NULL;
     pthread_mutex_lock(&g_lock);
     bool mine = !o->fields;
     if (mine) { __atomic_store_n(&o->fields, f, __ATOMIC_RELEASE); __atomic_store_n(&o->nfields, n, __ATOMIC_RELEASE); f = NULL; }
@@ -638,15 +642,18 @@ jvalue *dvm_slots(jobj *o)
  * that way is how a register ends up holding garbage. */
 jvalue *dvm_grow_slots(jobj *o, uint32_t need)
 {
+    if (!o || (uintptr_t)o < 0x1000ull) return NULL;
     pthread_mutex_lock(&g_lock);
     if (o->nfields < need) {
         dvm_class *c = dvm_class_of(o->kind == TL_K_CLASS ? g_class_class : o->cls);
         uint32_t nn = need;
         if (c && c->nslots > nn) nn = c->nslots;
         jvalue *f = calloc(nn, sizeof(jvalue));
-        if (o->fields && o->nfields) memcpy(f, o->fields, (size_t)o->nfields * sizeof(jvalue));
-        __atomic_store_n(&o->fields, f, __ATOMIC_RELEASE);
-        __atomic_store_n(&o->nfields, nn, __ATOMIC_RELEASE);
+        if (f) {
+            if (o->fields && o->nfields) memcpy(f, o->fields, (size_t)o->nfields * sizeof(jvalue));
+            __atomic_store_n(&o->fields, f, __ATOMIC_RELEASE);
+            __atomic_store_n(&o->nfields, nn, __ATOMIC_RELEASE);
+        }
     }
     jvalue *r = o->fields;
     pthread_mutex_unlock(&g_lock);
@@ -658,7 +665,8 @@ jvalue *dvm_grow_slots(jobj *o, uint32_t need)
  * how a store landed past the end of an array another thread had just replaced. */
 jvalue *dvm_slots_for(jobj *o, uint32_t slot)
 {
-    if (!o) { static jvalue dummy[128] = {0}; return dummy; }
+    static jvalue dummy[512] = {0};
+    if (!o || (uintptr_t)o < 0x1000ull) return dummy;
     uint32_t n = __atomic_load_n(&o->nfields, __ATOMIC_ACQUIRE);
     jvalue *f = __atomic_load_n(&o->fields, __ATOMIC_ACQUIRE);
     if (f && slot < n) return f;
@@ -668,13 +676,15 @@ jvalue *dvm_slots_for(jobj *o, uint32_t slot)
         f = __atomic_load_n(&o->fields, __ATOMIC_ACQUIRE);
         if (f && slot < n) return f;
     }
-    return dvm_grow_slots(o, slot + 1);
+    jvalue *res = dvm_grow_slots(o, slot + 1);
+    return res ? res : dummy;
 }
 
 jobj *dvm_new_object(tl_jclass *jc)
 {
+    if (!jc || (uintptr_t)jc < 0x1000ull) return NULL;
     jobj *o = tl_jni_new_object(jc);
-    o->refs = 1u << 30;
+    if (o) o->refs = 1u << 30;
     return o;
 }
 
@@ -1709,6 +1719,7 @@ dispatch:;
         if (!dc && class_missing(c)) { throw_missing(c); goto exception; }
         if (dc && !dvm_ensure_init(dc)) goto exception;
         jobj *o = dvm_new_object(c);
+        if (!o) { dvm_throw("java/lang/OutOfMemoryError", "Failed to allocate instance of %s", c ? c->name : "?"); goto exception; }
         if (dc) dvm_slots(o);
         WL(regs, AA, o);
         NEXT(2);

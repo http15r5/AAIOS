@@ -108,7 +108,6 @@ static void b_delete(void *p)
             return;
         }
     }
-    free(p);
 }
 static void b_delete_sized(void *p, size_t n) { (void)n; b_delete(p); }
 static void b_delete_aligned(void *p, size_t align) { (void)align; b_delete(p); }

@@ -38,20 +38,23 @@ NAT(Object_identityHashCode) { (void)self; *ret = I(a[0].l ? (int32_t)(((uintptr
 NAT(Object_internalClone)
 {
     (void)a;
-    jobj *c;
+    jobj *c = NULL;
     if (self->kind == TL_K_PRIM_ARRAY) {
         c = tl_jni_new_prim_array(self->arr.etype, self->arr.len);
-        memcpy(c->arr.data, self->arr.data, (size_t)self->arr.len * self->arr.esz);
+        if (c && c->arr.data && self->arr.data) memcpy(c->arr.data, self->arr.data, (size_t)self->arr.len * self->arr.esz);
     } else if (self->kind == TL_K_OBJ_ARRAY) {
         c = tl_jni_new_obj_array(NULL, self->oarr.len);
-        c->cls = self->cls;
-        memcpy(c->oarr.v, self->oarr.v, (size_t)self->oarr.len * sizeof(jobj *));
+        if (c) {
+            c->cls = self->cls;
+            if (c->oarr.v && self->oarr.v) memcpy(c->oarr.v, self->oarr.v, (size_t)self->oarr.len * sizeof(jobj *));
+        }
     } else if (self->kind == TL_K_STRING) {
         int32_t n; const uint16_t *s = chars(self, &n); c = tl_dvm_string_u16(s, n);
     } else {
         c = dvm_new_object(self->cls);
-        if (self->nfields) { c->fields = calloc(self->nfields, sizeof(jvalue)); memcpy(c->fields, self->fields, self->nfields * sizeof(jvalue)); c->nfields = self->nfields; }
+        if (c && self->nfields) { c->fields = calloc(self->nfields, sizeof(jvalue)); if (c->fields) memcpy(c->fields, self->fields, self->nfields * sizeof(jvalue)); c->nfields = self->nfields; }
     }
+    if (!c) return false;
     c->refs = 1u << 30;
     *ret = L(c);
     return true;
@@ -633,6 +636,7 @@ jobj *dvm_current_thread(void)
     dvm_class *c = dvm_class_of(tc);
     if (!c) return NULL;
     jobj *t = dvm_new_object(tc);
+    if (!t) return NULL;
     dvm_slots(t);
     t_thread = t;
     pthread_mutex_lock(&g_tid_lock);
@@ -894,6 +898,7 @@ NAT(Throwable_getStack)
         char cls[512]; snprintf(cls, sizeof(cls), "%s", m->cls->name);
         for (char *p = cls; *p; p++) if (*p == '/') *p = '.';
         jobj *e = dvm_new_object(ec);
+        if (!e) continue;
         e->refs = 1u << 30;
         const char *file = dvm_source_file(m->cls);
         jvalue args[4];
@@ -1087,7 +1092,9 @@ NAT(Class_newInstance)
     if (!dvm_ensure_init(c)) return false;
     dvm_method *init = dvm_find_method(c, "<init>", "()V", false);
     if (!init || init->cls != c) return dvm_throw("java/lang/InstantiationException", "%s has no zero-argument constructor", jc->name);
-    jobj *o = dvm_new_object(jc); dvm_slots(o);
+    jobj *o = dvm_new_object(jc);
+    if (!o) return false;
+    dvm_slots(o);
     jvalue r;
     if (!dvm_call(init, o, NULL, &r)) return false;
     *ret = L(o);
@@ -1102,9 +1109,10 @@ NAT(Class_ensureExtData)
     dvm_field *f = cc ? dvm_find_field(cc, "extData", false) : NULL;
     if (!f) { *ret = L(NULL); return true; }
     jvalue *s = dvm_slots(self);
+    if (!s) { *ret = L(NULL); return true; }
     if (!s[f->slot].l) {
         jobj *e = dvm_new_object(dvm_class_named("dalvik/system/ClassExt"));
-        dvm_slots(e);
+        if (e) dvm_slots(e);
         s[f->slot].l = e;
     }
     *ret = L(s[f->slot].l);
@@ -1132,7 +1140,10 @@ static int64_t field_offset(const dvm_field *f) { return (int64_t)f->slot * 8 + 
 static jobj *make_field(dvm_field *f)
 {
     tl_jclass *fc = tl_jni_class("java/lang/reflect/Field");
-    jobj *o = dvm_new_object(fc); jvalue *s = dvm_slots(o);
+    jobj *o = dvm_new_object(fc);
+    if (!o) return NULL;
+    jvalue *s = dvm_slots(o);
+    if (!s) return NULL;
     dvm_class *c = dvm_class_of(fc);
     dvm_field *x;
     if ((x = dvm_find_field(c, "declaringClass", false))) s[x->slot] = L(f->cls->jc->mirror);
@@ -1280,7 +1291,10 @@ static jobj *make_executable(dvm_method *m)
 {
     bool ctor = !strcmp(m->name, "<init>");
     tl_jclass *ec = tl_jni_class(ctor ? "java/lang/reflect/Constructor" : "java/lang/reflect/Method");
-    jobj *o = dvm_new_object(ec); jvalue *s = dvm_slots(o);
+    jobj *o = dvm_new_object(ec);
+    if (!o) return NULL;
+    jvalue *s = dvm_slots(o);
+    if (!s) return NULL;
     dvm_class *c = dvm_class_of(ec);
     dvm_field *x;
     if ((x = dvm_find_field(c, "artMethod", false))) s[x->slot] = J((int64_t)(uintptr_t)m);
@@ -1549,7 +1563,8 @@ static bool wrap_target_exception(void)
     dvm_class *c = dvm_class_of(ic);
     dvm_method *init = c ? dvm_find_method(c, "<init>", "(Ljava/lang/Throwable;)V", false) : NULL;
     if (!init) { tl_jni_set_pending(cause); return false; }
-    jobj *e = dvm_new_object(ic); dvm_slots(e);
+    jobj *e = dvm_new_object(ic);
+    if (e) dvm_slots(e);
     jvalue p = L(cause), r;
     if (dvm_ensure_init(c) && dvm_call(init, e, &p, &r)) tl_jni_set_pending(e);
     return false;
@@ -1577,7 +1592,9 @@ NAT(Ctor_newInstance0)
     if (abstract_refused(m->cls, m->cls->name)) return false;
     if (!unbox_args(m, a[0].l, args)) return false;
     if (!dvm_ensure_init(m->cls)) return false;
-    jobj *o = dvm_new_object(m->cls->jc); dvm_slots(o);
+    jobj *o = dvm_new_object(m->cls->jc);
+    if (!o) return false;
+    dvm_slots(o);
     jvalue r;
     if (!dvm_call(m, o, args, &r)) return wrap_target_exception();
     *ret = L(o);
@@ -1596,7 +1613,9 @@ NAT(Ctor_newInstanceFromSerialization)
     dvm_method *m = dvm_find_method(ctorc, "<init>", "()V", false);
     if (!m) return dvm_throw("java/lang/NoSuchMethodException", "%s.<init>()", cc->klass.jc->name);
     if (!dvm_ensure_init(allocc)) return false;
-    jobj *o = dvm_new_object(ac->klass.jc); dvm_slots(o);
+    jobj *o = dvm_new_object(ac->klass.jc);
+    if (!o) return false;
+    dvm_slots(o);
     jvalue r;
     if (!dvm_call(m, o, NULL, &r)) return wrap_target_exception();
     *ret = L(o);
@@ -1751,7 +1770,9 @@ NAT(U_allocateInstance)
     jobj *cls = a[0].l;
     if (!cls) return npe("class");
     if (abstract_refused(dvm_class_of(cls->klass.jc), cls->klass.jc->name)) return false;
-    jobj *o = dvm_new_object(cls->klass.jc); dvm_slots(o);
+    jobj *o = dvm_new_object(cls->klass.jc);
+    if (!o) return false;
+    dvm_slots(o);
     *ret = L(o);
     return true;
 }

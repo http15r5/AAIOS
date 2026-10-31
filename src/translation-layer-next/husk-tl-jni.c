@@ -38,6 +38,7 @@ static uint32_t hash_str(const char *s) { uint32_t h = 2166136261u; while (*s) {
 static jobj *obj_alloc(uint8_t kind, tl_jclass *cls)
 {
     jobj *o = calloc(1, sizeof(*o));
+    if (!o) return NULL;
     o->refs = 1;
     o->kind = kind;
     o->cls = cls;
@@ -109,8 +110,10 @@ static tl_jclass *tl_jni_declare_linked(const char *name, const char *super)
         g_classes[h] = c;
         c->in_dex = tl_dexidx_has_class(name);
         c->mirror = obj_alloc(TL_K_CLASS, NULL);
-        c->mirror->klass.jc = c;
-        c->mirror->refs = 1u << 30;
+        if (c->mirror) {
+            c->mirror->klass.jc = c;
+            c->mirror->refs = 1u << 30;
+        }
         /* A class the interpreter has bytecode for: it says what the superclass is, and keeps the statics. */
         if (tl_dvm) {
             c->linking = true;
@@ -150,10 +153,15 @@ jobj *tl_jni_class_object(const char *name) { return tl_jni_class(name)->mirror;
 
 jobj *tl_jni_new_object(tl_jclass *cls)
 {
+    if (!cls || (uintptr_t)cls < 0x1000ull) return NULL;
     jobj *o = obj_alloc(TL_K_OBJECT, cls);
-    if (tl_dvm && cls && cls->dvm) {
+    if (!o) return NULL;
+    if (tl_dvm && cls->dvm) {
         uint32_t n = tl_dvm->instance_slots(cls);
-        if (n) { o->fields = calloc(n, sizeof(jvalue)); o->nfields = n; }
+        if (n) {
+            o->fields = calloc(n, sizeof(jvalue));
+            o->nfields = o->fields ? n : 0;
+        }
     }
     return o;
 }
@@ -161,6 +169,7 @@ jobj *tl_jni_new_object(tl_jclass *cls)
 jobj *tl_jni_new_string(const char *utf8)
 {
     jobj *o = obj_alloc(TL_K_STRING, tl_jni_class("java/lang/String"));
+    if (!o) return NULL;
     o->str.utf8 = strdup(utf8 ? utf8 : "");
     return o;
 }
@@ -177,6 +186,7 @@ jobj *tl_jni_new_prim_array(char etype, uint32_t len)
     if (etype == 'Z' || etype == 'B' || etype == 'C' || etype == 'S' || etype == 'I' || etype == 'J' || etype == 'F' || etype == 'D') { /* ok */ }
     char cn[4] = { '[', etype, 0 };
     jobj *o = obj_alloc(TL_K_PRIM_ARRAY, tl_jni_class(cn));
+    if (!o) return NULL;
     o->arr.esz = esz_of(etype); o->arr.etype = etype; o->arr.len = len;
     o->arr.data = calloc(len ? len : 1, o->arr.esz);
     return o;
@@ -185,8 +195,9 @@ jobj *tl_jni_new_prim_array(char etype, uint32_t len)
 jobj *tl_jni_new_obj_array(tl_jclass *elem, uint32_t len)
 {
     char cn[1024];
-    snprintf(cn, sizeof(cn), "[L%s;", elem ? elem->name : "java/lang/Object");
+    snprintf(cn, sizeof(cn), "[L%s;", (elem && (uintptr_t)elem >= 0x1000ull) ? elem->name : "java/lang/Object");
     jobj *o = obj_alloc(TL_K_OBJ_ARRAY, tl_jni_class(cn));
+    if (!o) return NULL;
     o->oarr.len = len;
     o->oarr.v = calloc(len ? len : 1, sizeof(jobj *));
     return o;
@@ -460,8 +471,10 @@ static __thread jobj *t_pending;
 void tl_jni_throw(const char *cls, const char *msg)
 {
     jobj *e = tl_jni_new_object(tl_jni_class(cls));
-    jvalue v; v.l = tl_jni_new_string(msg ? msg : "");
-    tl_jni_set_field(e, "detailMessage", "Ljava/lang/String;", v);
+    if (e) {
+        jvalue v; v.l = tl_jni_new_string(msg ? msg : "");
+        tl_jni_set_field(e, "detailMessage", "Ljava/lang/String;", v);
+    }
     t_pending = e;
     tl_log_line("jni: throwing %s: %s", cls, msg ? msg : "");
 }
@@ -753,6 +766,7 @@ static jo new_object(jo cls, void *mid, int how, const jvalue *a, tl_va_list *ap
 {
     if (!cls || cls->kind != TL_K_CLASS) { tl_jni_throw("java/lang/NullPointerException", "class is null"); return NULL; }
     jobj *o = tl_jni_new_object(cls->klass.jc);
+    if (!o) return NULL;
     tl_jmeth *m = mid_ok(mid);
     if (m) {
         jvalue args[40];
@@ -802,7 +816,7 @@ static void *jni_GetStaticFieldID(void *env, jo cls, const char *n, const char *
 static jobj *reflected(const char *cls, void *member)
 {
     jobj *o = tl_jni_new_object(tl_jni_class(cls));
-    o->native = member;
+    if (o) o->native = member;
     return o;
 }
 
@@ -1156,12 +1170,14 @@ static jo jni_NewDirectByteBuffer(void *env, void *addr, int64_t cap)
         /* the Java runtime's own DirectByteBuffer, made as ART makes it for JNI: DirectByteBuffer(long address, int capacity) */
         tl_jclass *c = tl_jni_class("java/nio/DirectByteBuffer");
         jobj *o = tl_jni_new_object(c);
+        if (!o) return NULL;
         tl_jmeth *m = lookup_method(c, "<init>", "(JI)V", false);
         jvalue args[2]; args[0].j = (int64_t)(uintptr_t)addr; args[1].j = 0; args[1].i = (int32_t)cap;
         invoke(o, m, true, args);
         return o;
     }
     jobj *o = tl_jni_new_object(tl_jni_class("java/nio/DirectByteBuffer"));
+    if (!o) return NULL;
     jvalue a, c; a.l = addr; c.j = cap;
     tl_jni_set_field(o, "address", "J", a);
     tl_jni_set_field(o, "capacity", "J", c);
