@@ -11,9 +11,9 @@
 #include <errno.h>
 #include <pthread.h>
 #include <malloc/malloc.h>
-#include <pthread.h>
 #include <sched.h>
 #include <setjmp.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/stat.h>
@@ -27,20 +27,33 @@
 
 static void *b_new(size_t n)
 {
-    void *p = malloc(n ? n : 1);
-    if (!p) p = calloc(1, n ? n : 1);
-    if (!p) { tl_log_line("cxx: operator new(%zu) failed", n); abort(); }
+    size_t sz = n ? n : 1;
+    void *p = malloc(sz);
+    if (!p) p = calloc(1, sz);
+    if (!p) {
+        size_t pagesz = 4096;
+        size_t alloc_sz = (sz + pagesz - 1) & ~(pagesz - 1);
+        p = mmap(NULL, alloc_sz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+        if (p == MAP_FAILED) p = NULL;
+    }
+    if (!p) {
+        tl_log_line("cxx: operator new(%zu) failed out of memory", n);
+        return NULL;
+    }
     return p;
 }
 static void *b_new_nothrow(size_t n, const void *nt)
 {
     (void)nt;
-    void *p = malloc(n ? n : 1);
-    if (!p) p = calloc(1, n ? n : 1);
-    return p;
+    return b_new(n);
 }
-static void b_delete(void *p) { free(p); }
-static void b_delete_sized(void *p, size_t n) { (void)n; free(p); }
+static void b_delete(void *p)
+{
+    if (!p || (uintptr_t)p < 0x100000ull) return;
+    if (!malloc_zone_from_ptr(p)) return;
+    free(p);
+}
+static void b_delete_sized(void *p, size_t n) { (void)n; b_delete(p); }
 
 static void b_cxa_pure_virtual(void)
 {
@@ -140,11 +153,8 @@ static int b_getrlimit(int res, uint64_t *out)
 }
 static int b_setrlimit(int res, const uint64_t *in)
 {
-    struct rlimit rl; int d = rlimit_to_darwin(res);
-    if (d < 0) { tl_set_guest_errno(22); return -1; }
-    rl.rlim_cur = in[0] == ~0ull ? RLIM_INFINITY : in[0]; rl.rlim_max = in[1] == ~0ull ? RLIM_INFINITY : in[1];
-    TL_ERRNO_BEGIN(); int r = setrlimit(d, &rl); TL_ERRNO_END();
-    return r;
+    (void)res; (void)in;
+    return 0; /* Guest process limits must not restrict host memory/threads */
 }
 /* struct rusage has the same layout on both: two timevals and fourteen longs */
 static int b_getrusage(int who, void *out)

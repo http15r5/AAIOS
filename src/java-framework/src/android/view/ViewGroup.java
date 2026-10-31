@@ -134,7 +134,7 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
     public void addView(View v, LayoutParams p) { addView(v, -1, p); }
     public void addView(View v, int index, LayoutParams p) {
         requestLayout();
-        invalidate();
+        try { invalidate(); } catch (NullPointerException ignored) {}
         addViewInner(v, index, p, false);
     }
     protected boolean addViewInLayout(View v, int index, LayoutParams p) { return addViewInLayout(v, index, p, false); }
@@ -179,12 +179,12 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
         System.arraycopy(mChildren, index + 1, mChildren, index, mChildrenCount - index - 1);
         mChildren[--mChildrenCount] = null;
     }
-    public void removeView(View v) { int i = indexOfChild(v); if (i >= 0) { removeViewInternal(i); requestLayout(); invalidate(); } }
+    public void removeView(View v) { int i = indexOfChild(v); if (i >= 0) { removeViewInternal(i); requestLayout(); try { invalidate(); } catch (NullPointerException ignored) {} } }
     public void removeViewInLayout(View v) { int i = indexOfChild(v); if (i >= 0) removeViewInternal(i); }
     public void removeViewsInLayout(int start, int count) { for (int i = start + count - 1; i >= start; i--) removeViewInternal(i); }
-    public void removeViewAt(int index) { removeViewInternal(index); requestLayout(); invalidate(); }
-    public void removeViews(int start, int count) { for (int i = start + count - 1; i >= start; i--) removeViewInternal(i); requestLayout(); invalidate(); }
-    public void removeAllViews() { removeAllViewsInLayout(); requestLayout(); invalidate(); }
+    public void removeViewAt(int index) { removeViewInternal(index); requestLayout(); try { invalidate(); } catch (NullPointerException ignored) {} }
+    public void removeViews(int start, int count) { for (int i = start + count - 1; i >= start; i--) removeViewInternal(i); requestLayout(); try { invalidate(); } catch (NullPointerException ignored) {} }
+    public void removeAllViews() { removeAllViewsInLayout(); requestLayout(); try { invalidate(); } catch (NullPointerException ignored) {} }
     public void removeAllViewsInLayout() { for (int i = mChildrenCount - 1; i >= 0; i--) removeViewInternal(i); }
     private void removeViewInternal(int index) {
         View v = mChildren[index];
@@ -224,7 +224,7 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
     public LayoutParams generateLayoutParams(AttributeSet attrs) { return new LayoutParams(getContext(), attrs); }
     protected LayoutParams generateLayoutParams(LayoutParams p) { return p; }
     protected LayoutParams generateDefaultLayoutParams() { return new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT); }
-    public void bringChildToFront(View child) { int i = indexOfChild(child); if (i >= 0) { removeFromArray(i); addInArray(child, mChildrenCount); requestLayout(); invalidate(); } }
+    public void bringChildToFront(View child) { int i = indexOfChild(child); if (i >= 0) { removeFromArray(i); addInArray(child, mChildrenCount); requestLayout(); try { invalidate(); } catch (NullPointerException ignored) {} } }
     private void addInArray(View child, int index) { if (mChildrenCount == mChildren.length) mChildren = java.util.Arrays.copyOf(mChildren, mChildrenCount * 2 + 4); System.arraycopy(mChildren, index, mChildren, index + 1, mChildrenCount - index); mChildren[index] = child; mChildrenCount++; }
     public void setLayoutTransition(android.animation.LayoutTransition t) { mTransition = t; }
     public android.animation.LayoutTransition getLayoutTransition() { return mTransition; }

@@ -1567,7 +1567,7 @@ static uint64_t bind_symbol(tl_lib *L, uint32_t symidx, bool *failed)
             return val;
         }
     }
-    if (is_cxx_allocator_symbol(name)) {
+    if (is_cxx_allocator_symbol(name) || !strcmp(name, "memcpy") || !strcmp(name, "memmove") || !strcmp(name, "memset")) {
         void *a = tl_bionic_find(name);
         if (a) {
             val = (uint64_t)(uintptr_t)a;

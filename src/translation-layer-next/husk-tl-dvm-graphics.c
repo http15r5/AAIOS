@@ -486,7 +486,7 @@ static bool paint_begin(CGContextRef c, const int32_t *p, bool *layered)
     CGContextSetInterpolationQuality(c, (p[P_FLAGS] & PF_FILTER) ? kCGInterpolationDefault : kCGInterpolationNone);
     if (pf(p, P_SHRAD) > 0) {
         CGColorRef sc = color_of((uint32_t)p[P_SHCOL], 1);
-        CGContextSetShadowWithColor(c, CGSizeMake(pf(p, P_SHDX), -pf(p, P_SHDY)), pf(p, P_SHRAD), sc);
+        CGContextSetShadowWithColor(c, CGSizeMake(pf(p, P_SHDX), pf(p, P_SHDY)), pf(p, P_SHRAD), sc);
         CGColorRelease(sc);
     }
     if (p[P_CFMODE] >= 0) {
@@ -496,8 +496,7 @@ static bool paint_begin(CGContextRef c, const int32_t *p, bool *layered)
     } else CGContextSetBlendMode(c, blend_of(p[P_XFER]));
     return true;
 }
-/* What was drawn, as a clip: MULTIPLY's filter colour is laid only over it (Android keeps the drawing's alpha, Sa*Da; CoreGraphics's
-   multiply would fill the whole area -- Telegram's tinted wordmark came out a solid block). */
+/* What was drawn, as a clip: the filter colour is laid only over it */
 typedef void (*clip_fn)(CGContextRef c, const void *ctx);
 static void paint_end_clip(CGContextRef c, const int32_t *p, bool layered, CGRect area, clip_fn clip, const void *ctx);
 static void paint_end(CGContextRef c, const int32_t *p, bool layered, CGRect area) { paint_end_clip(c, p, layered, area, NULL, NULL); }
@@ -510,7 +509,7 @@ static void paint_end_clip(CGContextRef c, const int32_t *p, bool layered, CGRec
         CGContextSetShadowWithColor(c, CGSizeZero, 0, NULL);
         int m = p[P_CFMODE];
         CGContextSetBlendMode(c, m == 3 ? kCGBlendModeNormal : blend_of(m));
-        if (m == 13 && clip) { CGContextSaveGState(c); clip(c, ctx); CGContextFillRect(c, CGRectInset(area, -2, -2)); CGContextRestoreGState(c); }
+        if (clip) { CGContextSaveGState(c); clip(c, ctx); CGContextFillRect(c, CGRectInset(area, -2, -2)); CGContextRestoreGState(c); }
         else CGContextFillRect(c, CGRectInset(area, -2, -2));
         CGContextEndTransparencyLayer(c);
     }
@@ -1140,6 +1139,11 @@ NAT(G_cvDrawBitmap)
         CGContextSetFillColorWithColor(c, CGColorGetConstantColor(kCGColorBlack));
         CGContextSetAlpha(c, (float)((uint32_t)q[P_COLOR] >> 24) / 255.0f);
         CGContextSaveGState(c);
+        if (pf(q, P_SHRAD) > 0) {
+            CGColorRef sc = color_of((uint32_t)q[P_SHCOL], 1);
+            CGContextSetShadowWithColor(c, CGSizeMake(pf(q, P_SHDX), -pf(q, P_SHDY)), pf(q, P_SHRAD), sc);
+            CGColorRelease(sc);
+        }
         CGContextTranslateCTM(c, dl, db); CGContextScaleCTM(c, 1, -1);
         CGContextDrawImage(c, CGRectMake(0, 0, dr - dl, db - dt), img);
         CGContextRestoreGState(c);
@@ -1165,6 +1169,11 @@ NAT(G_cvDrawBitmapM)
     if (paint_begin(c, q, &layered)) {
         CGContextSetAlpha(c, (float)((uint32_t)q[P_COLOR] >> 24) / 255.0f);
         CGContextSaveGState(c);
+        if (pf(q, P_SHRAD) > 0) {
+            CGColorRef sc = color_of((uint32_t)q[P_SHCOL], 1);
+            CGContextSetShadowWithColor(c, CGSizeMake(pf(q, P_SHDX), -pf(q, P_SHDY)), pf(q, P_SHRAD), sc);
+            CGColorRelease(sc);
+        }
         CGContextConcatCTM(c, CGAffineTransformMake(m[0], m[3], m[1], m[4], m[2], m[5]));
         CGContextTranslateCTM(c, 0, b->h); CGContextScaleCTM(c, 1, -1);
         CGContextDrawImage(c, CGRectMake(0, 0, b->w, b->h), img);
