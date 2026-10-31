@@ -1018,10 +1018,11 @@ static void *b_fdopendir(int fd)
     g->dir = d;
     return g;
 }
-static int b_dirfd(void *dp) { guest_dir *g = dp; if (!g->dir) { tl_set_guest_errno(95); return -1; } return dirfd(g->dir); }
-static void b_rewinddir(void *dp) { guest_dir *g = dp; if (g->dir) rewinddir(g->dir); else g->pos = 0; }
+static int b_dirfd(void *dp) { if (!dp) { tl_set_guest_errno(9 /* EBADF */); return -1; } guest_dir *g = dp; if (!g->dir) { tl_set_guest_errno(95); return -1; } return dirfd(g->dir); }
+static void b_rewinddir(void *dp) { if (!dp) { tl_set_guest_errno(9); return; } guest_dir *g = dp; if (g->dir) rewinddir(g->dir); else g->pos = 0; }
 static void *b_readdir(void *dp)
 {
+    if (!dp) { tl_set_guest_errno(9 /* EBADF */); return NULL; }
     guest_dir *g = dp;
     if (!g->dir) {
         if (g->pos >= g->n) return NULL;
@@ -1036,7 +1037,7 @@ static void *b_readdir(void *dp)
     snprintf(g->ent.d_name, sizeof(g->ent.d_name), "%s", e->d_name);
     return &g->ent;
 }
-static int b_closedir(void *dp) { guest_dir *g = dp; int r = g->dir ? closedir(g->dir) : 0; for (size_t i = 0; i < g->n; i++) free(g->names[i]); free(g->names); free(g->types); free(g); return r; }
+static int b_closedir(void *dp) { if (!dp) { tl_set_guest_errno(9 /* EBADF */); return -1; } guest_dir *g = dp; int r = g->dir ? closedir(g->dir) : 0; for (size_t i = 0; i < g->n; i++) free(g->names[i]); free(g->names); free(g->types); free(g); return r; }
 
 /* scandir: the entries of a directory, optionally filtered and sorted by functions of the guest's own (the same ISA, so they are called directly). */
 static int b_alphasort(const guest_dirent **a, const guest_dirent **b) { return strcoll((*a)->d_name, (*b)->d_name); }

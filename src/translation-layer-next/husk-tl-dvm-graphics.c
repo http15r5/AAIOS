@@ -201,11 +201,35 @@ static CTFontRef with_weight(CTFontRef f, int weight, bool italic)
     return out;
 }
 
+static CTFontRef font_with_cascade(CTFontRef f)
+{
+    if (!f) return NULL;
+    CFArrayRef cascade = CTFontCopyDefaultCascadeListForLanguages(f, NULL);
+    if (!cascade) return f;
+    CTFontDescriptorRef baseDesc = CTFontCopyFontDescriptor(f);
+    if (!baseDesc) { CFRelease(cascade); return f; }
+    const void *keys[] = { kCTFontCascadeListAttribute };
+    const void *vals[] = { cascade };
+    CFDictionaryRef attrs = CFDictionaryCreate(NULL, keys, vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CTFontDescriptorRef cascadedDesc = attrs ? CTFontDescriptorCreateCopyWithAttributes(baseDesc, attrs) : NULL;
+    CTFontRef outFont = cascadedDesc ? CTFontCreateWithFontDescriptor(cascadedDesc, CTFontGetSize(f), NULL) : NULL;
+    if (cascadedDesc) CFRelease(cascadedDesc);
+    if (attrs) CFRelease(attrs);
+    CFRelease(baseDesc);
+    CFRelease(cascade);
+    if (outFont) {
+        CFRelease(f);
+        return outFont;
+    }
+    return f;
+}
+
 static gface *face_make(CTFontRef base, int style, int weight)
 {
     gface *g = calloc(1, sizeof(*g));
     if (!weight) weight = (style & 1) ? 700 : 400;
-    g->base = with_weight(base, weight, (style & 2) != 0);
+    CTFontRef w = with_weight(base, weight, (style & 2) != 0);
+    g->base = font_with_cascade(w);
     g->style = style; g->weight = weight;
     return g;
 }
@@ -1353,7 +1377,7 @@ NAT(G_tfFromData)
     CTFontDescriptorRef desc = CTFontManagerCreateFontDescriptorFromData(data);
     CFRelease(data);
     if (!desc) return true;
-    CTFontRef f = CTFontCreateWithFontDescriptor(desc, 12, NULL);
+    CTFontRef f = font_with_cascade(CTFontCreateWithFontDescriptor(desc, 12, NULL));
     CFRelease(desc);
     gface *g = calloc(1, sizeof(*g));
     g->base = f; g->weight = 400;

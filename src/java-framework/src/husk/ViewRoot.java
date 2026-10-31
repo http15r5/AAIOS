@@ -322,7 +322,7 @@ public final class ViewRoot implements ViewParent {
             if (r.mRemoved || r.mView.getVisibility() != View.VISIBLE) continue;
             if ((r.mLp.flags & WindowManager.LayoutParams.FLAG_DIM_BEHIND) != 0 && r.mLp.dimAmount > 0) {
                 if (dim == null) dim = new Paint();
-                dim.setColor(Color.argb(Math.round(Math.min(1, r.mLp.dimAmount) * 0.6f * 255), 0, 0, 0));
+                dim.setColor(Color.argb(Math.round(Math.min(1, r.mLp.dimAmount) * 255), 0, 0, 0));
                 sCanvas.drawRect(0, 0, sw, sh, dim);
             }
             int save = sCanvas.save();

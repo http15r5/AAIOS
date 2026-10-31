@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <mach/mach.h>
 
 /* ------------------------------------------------------------ operator new/delete */
 
@@ -53,6 +54,16 @@ static void *b_new(size_t n)
         }
     }
     if (!p) {
+        vm_address_t addr = 0;
+        size_t psz = (sz + sizeof(husk_mmap_hdr_t) + 0x3FFF) & ~0x3FFFull;
+        if (vm_allocate(mach_task_self(), &addr, psz, VM_FLAGS_ANYWHERE) == KERN_SUCCESS) {
+            husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)addr;
+            hdr->magic = HUSK_MMAP_MAGIC;
+            hdr->size = psz;
+            p = (void *)(hdr + 1);
+        }
+    }
+    if (!p) {
         tl_log_line("cxx: operator new(%zu) failed out of memory", n);
         abort();
     }
@@ -73,6 +84,16 @@ static void *b_new_nothrow(size_t n, const void *nt)
         void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
         if (m != MAP_FAILED) {
             husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)m;
+            hdr->magic = HUSK_MMAP_MAGIC;
+            hdr->size = psz;
+            p = (void *)(hdr + 1);
+        }
+    }
+    if (!p) {
+        vm_address_t addr = 0;
+        size_t psz = (sz + sizeof(husk_mmap_hdr_t) + 0x3FFF) & ~0x3FFFull;
+        if (vm_allocate(mach_task_self(), &addr, psz, VM_FLAGS_ANYWHERE) == KERN_SUCCESS) {
+            husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)addr;
             hdr->magic = HUSK_MMAP_MAGIC;
             hdr->size = psz;
             p = (void *)(hdr + 1);
@@ -117,7 +138,12 @@ static void b_delete(void *p)
             }
         }
     }
-    free(p);
+    malloc_zone_t *z = malloc_zone_from_ptr(p);
+    if (z) {
+        malloc_zone_free(z, p);
+    } else if (malloc_size(p) > 0) {
+        free(p);
+    }
 }
 static void b_delete_sized(void *p, size_t n) { (void)n; b_delete(p); }
 static void b_delete_aligned(void *p, size_t align) { (void)align; b_delete(p); }

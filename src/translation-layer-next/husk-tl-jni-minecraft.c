@@ -199,8 +199,16 @@ static void MA_timeFromStart(tl_jcall *c)
     c->ret = vj((int64_t)(now.tv_sec - M.started.tv_sec) * 1000 + (now.tv_nsec - M.started.tv_nsec) / 1000000);
 }
 static void MA_totalMemory(tl_jcall *c) { c->ret = vj(total_memory()); }
-static void MA_freeMemory(tl_jcall *c) { int64_t f = avail_memory() - MEM_THRESHOLD; c->ret = vj(f > 0 ? f : 0); }
-static void MA_memoryLimit(tl_jcall *c) { c->ret = vj(total_memory() - MEM_THRESHOLD); }
+static void MA_freeMemory(tl_jcall *c) {
+    int64_t a = avail_memory();
+    int64_t f = a > MEM_THRESHOLD ? a - MEM_THRESHOLD : a / 2;
+    c->ret = vj(f > (128ll << 20) ? f : (128ll << 20));
+}
+static void MA_memoryLimit(tl_jcall *c) {
+    int64_t t = total_memory();
+    int64_t l = t > MEM_THRESHOLD ? t - MEM_THRESHOLD : t;
+    c->ret = vj(l > (1024ll << 20) ? l : (1024ll << 20));
+}
 static void MA_lowMemoryThreshold(tl_jcall *c) { c->ret = vj(MEM_THRESHOLD); }
 static void MA_usedMemory(tl_jcall *c) { int64_t u = total_memory() - avail_memory(); c->ret = vj(u > 0 ? u : 0); }
 static void MA_debugMemoryInfo(tl_jcall *c) { c->ret = vj(0); }
