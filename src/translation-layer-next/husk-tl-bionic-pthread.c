@@ -443,7 +443,7 @@ typedef struct { uint32_t flags; uint32_t pad; void *stack_base; size_t stack_si
 _Static_assert(sizeof(guest_attr) == 56, "bionic pthread_attr_t is 56 bytes on LP64");
 _Static_assert(sizeof(guest_obj) <= 16, "guest_obj must fit bionic's smallest object, sem_t");
 #define GATTR_DETACHED 1u
-#define DEFAULT_STACK (1024u * 1024u)
+#define DEFAULT_STACK (2048u * 1024u)
 
 static int b_attr_init(guest_attr *a)
 {
@@ -538,7 +538,7 @@ static int b_create(pthread_t *out, const guest_attr *attr, void *(*fn)(void *),
     pthread_attr_t a;
     pthread_attr_init(&a);
     size_t stack = attr && attr->stack_size ? attr->stack_size : DEFAULT_STACK;
-    if (stack < (512u * 1024u)) stack = 512u * 1024u;
+    if (stack < (1024u * 1024u)) stack = 1024u * 1024u;
     if (stack > (8u << 20)) stack = 8u << 20;
     stack = (stack + 16383) & ~(size_t)16383;
     pthread_attr_setstacksize(&a, stack);

@@ -1016,8 +1016,8 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
         t_stack_low = top - sz + reserve;
     }
     uintptr_t sp = (uintptr_t)__builtin_frame_address(0);
-    /* the error is thrown with 8 KB still above t_stack_low, which its own calls may use; also check sp against t_stack_low for native C++ caller stacks */
-    if (t_depth > (t_overflowing ? 500 : 450) || (t_stack_low && sp < t_stack_low + (t_overflowing ? 0 : 8192))) {
+    /* the error is thrown with 8 KB still above t_stack_low, which its own calls may use; only check sp when depth > 150 to avoid false positives on deep native C++ stacks */
+    if (t_depth > (t_overflowing ? 500 : 450) || (t_depth > 150 && t_stack_low && sp < t_stack_low + (t_overflowing ? 0 : 8192))) {
         t_depth--;
         if (t_overflowing) return false;
         t_overflowing = true;

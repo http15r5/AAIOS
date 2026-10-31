@@ -1044,13 +1044,18 @@ public class View implements Drawable.Callback, KeyEvent.Callback {
                     float dy = Math.min(z * 0.5f, 12f);
                     int sc = ((int)(Math.min(1.0f, o.mAlpha) * 0x38)) << 24;
                     sp.setShadowLayer(rad, 0, dy, sc);
-                    sp.setColor(sc);
+                    sp.setColor(0xFF000000);
                     if (o.mPath != null) {
+                        c.clipOutPath(o.mPath);
                         c.drawPath(o.mPath, sp);
                     } else if (o.mRect != null) {
                         if (o.mRadius > 0) {
-                            c.drawRoundRect(new RectF(o.mRect), o.mRadius, o.mRadius, sp);
+                            Path rp = new Path();
+                            rp.addRoundRect(new RectF(o.mRect), o.mRadius, o.mRadius, Path.Direction.CW);
+                            c.clipOutPath(rp);
+                            c.drawPath(rp, sp);
                         } else {
+                            c.clipOutRect(o.mRect);
                             c.drawRect(o.mRect, sp);
                         }
                     }

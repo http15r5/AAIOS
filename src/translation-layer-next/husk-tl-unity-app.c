@@ -115,13 +115,9 @@ static void on_fatal(int sig, siginfo_t *info, void *uctx)
             }
         }
         if (is_deadcode) {
-            tl_log_line("ld: caught Bedrock intentional assert trap (0xdeadc0de) at pc %p, returning to lr %p",
-                        (void *)uc->uc_mcontext->__ss.__pc, (void *)uc->uc_mcontext->__ss.__lr);
-            if (uc->uc_mcontext->__ss.__lr) {
-                uc->uc_mcontext->__ss.__pc = uc->uc_mcontext->__ss.__lr;
-            } else {
-                uc->uc_mcontext->__ss.__pc += 4;
-            }
+            tl_log_line("ld: caught Bedrock intentional assert trap (0xdeadc0de) at pc %p, advancing pc by 4",
+                        (void *)uc->uc_mcontext->__ss.__pc);
+            uc->uc_mcontext->__ss.__pc += 4;
             return;
         }
     }
@@ -164,7 +160,7 @@ static void install_crash_reporter(void)
     sa.sa_sigaction = on_fatal;
     sa.sa_flags = SA_SIGINFO | SA_NODEFER;
     sigemptyset(&sa.sa_mask);
-    static const int sigs[] = { SIGSEGV, SIGBUS, SIGILL };      /* not SIGTRAP: the app's brk guard owns it */
+    static const int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGABRT };      /* not SIGTRAP: the app's brk guard owns it */
     for (size_t i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++) sigaction(sigs[i], &sa, &g_prev[sigs[i]]);
 }
 

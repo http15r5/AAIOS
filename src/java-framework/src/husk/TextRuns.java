@@ -23,14 +23,9 @@ public final class TextRuns {
             wp.set(paint);
             ReplacementSpan repl = null;
             for (MetricAffectingSpan m : sp.getSpans(i, next, MetricAffectingSpan.class)) { if (m instanceof ReplacementSpan) repl = (ReplacementSpan) m; else m.updateMeasureState(wp); }
-            if (repl != null) {
-                int rEnd = Math.min(sp.getSpanEnd(repl), end);
-                w += repl.getSize(wp, text, sp.getSpanStart(repl), sp.getSpanEnd(repl), null);
-                i = rEnd > i ? rEnd : next;
-            } else {
-                w += wp.measureText(s, i, next);
-                i = next;
-            }
+            if (repl != null) { if (i == sp.getSpanStart(repl) || i == start) w += repl.getSize(wp, text, sp.getSpanStart(repl), sp.getSpanEnd(repl), null); }
+            else w += wp.measureText(s, i, next);
+            i = next;
         }
         return w;
     }
@@ -53,12 +48,9 @@ public final class TextRuns {
             }
             float w;
             if (repl != null) {
-                int rEnd = Math.min(sp.getSpanEnd(repl), end);
                 w = repl.getSize(wp, text, sp.getSpanStart(repl), sp.getSpanEnd(repl), null);
-                repl.draw(c, text, sp.getSpanStart(repl), sp.getSpanEnd(repl), x, top, (int) baseline, bottom, wp);
-                x += w;
-                i = rEnd > i ? rEnd : next;
-                continue;
+                if (i == sp.getSpanStart(repl) || i == start) repl.draw(c, text, sp.getSpanStart(repl), sp.getSpanEnd(repl), x, top, (int) baseline, bottom, wp);
+                x += w; i = next; continue;
             }
             w = wp.measureText(s, i, next);
             if (wp.bgColor != 0) { Paint bg = new Paint(); bg.setColor(wp.bgColor); c.drawRect(x, top, x + w, bottom, bg); }
