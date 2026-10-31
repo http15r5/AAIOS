@@ -305,7 +305,7 @@ jobj *dvm_dex_string(dvm_dex *d, uint32_t idx) { return const_string(d, idx); }
 
 /* ================================================================== classes */
 
-dvm_class *dvm_class_of(tl_jclass *jc) { if (!jc) return NULL; if (jc->linking) tl_jni_wait_linked(jc); return (dvm_class *)jc->dvm; }
+dvm_class *dvm_class_of(tl_jclass *jc) { if (!jc || (uintptr_t)jc < 0x100000ull) return NULL; if (jc->linking) tl_jni_wait_linked(jc); return (dvm_class *)jc->dvm; }
 
 tl_jclass *dvm_class_named(const char *name)
 {
@@ -680,7 +680,7 @@ jobj *dvm_new_object(tl_jclass *jc)
 
 tl_jclass *dvm_object_class(jobj *o)
 {
-    if (!o) return NULL;
+    if (!o || (uintptr_t)o < 0x100000ull) return NULL;
     if (o->kind == TL_K_CLASS) return g_class_class;
     return o->cls;
 }

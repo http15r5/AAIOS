@@ -765,17 +765,15 @@ typedef struct { jobj *thread; } start_arg;
 static void *thread_main(void *p)
 {
     void tl_thread_altstack(void); tl_thread_altstack();
-    start_arg *s = p;
-    if (!s || !s->thread || (uintptr_t)s->thread < 0x100000ull) {
-        if (s) free(s);
-        return NULL;
-    }
-    t_thread = s->thread;
+    if (!p || (uintptr_t)p < 0x100000ull) return NULL;
+    start_arg *s = (start_arg *)p;
+    jobj *t = s->thread;
     free(s);
-    jobj *t = t_thread;
+    if (!t || (uintptr_t)t < 0x100000ull) return NULL;
+    t_thread = t;
     jvalue nm; dvm_class *c = dvm_class_of(dvm_object_class(t));
     dvm_field *nf = c ? dvm_find_field(c, "name", false) : NULL;
-    if (nf) { nm = t->fields[nf->slot]; const char *n = tl_jni_string(nm.l); if (n) pthread_setname_np(n); }
+    if (nf && t->fields) { nm = t->fields[nf->slot]; const char *n = tl_jni_string(nm.l); if (n) pthread_setname_np(n); }
     dvm_method *run = dvm_find_virtual(dvm_object_class(t), "run", "()V");
     jvalue r;
     if (run && !dvm_call(run, t, NULL, &r)) {

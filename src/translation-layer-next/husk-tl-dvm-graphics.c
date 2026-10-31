@@ -486,7 +486,7 @@ static bool paint_begin(CGContextRef c, const int32_t *p, bool *layered)
     CGContextSetInterpolationQuality(c, (p[P_FLAGS] & PF_FILTER) ? kCGInterpolationDefault : kCGInterpolationNone);
     if (pf(p, P_SHRAD) > 0) {
         CGColorRef sc = color_of((uint32_t)p[P_SHCOL], 1);
-        CGContextSetShadowWithColor(c, CGSizeMake(pf(p, P_SHDX), -pf(p, P_SHDY)), pf(p, P_SHRAD), sc);
+        CGContextSetShadowWithColor(c, CGSizeMake(pf(p, P_SHDX), pf(p, P_SHDY)), pf(p, P_SHRAD), sc);
         CGColorRelease(sc);
     }
     if (p[P_CFMODE] >= 0) {
@@ -509,8 +509,14 @@ static void paint_end_clip(CGContextRef c, const int32_t *p, bool layered, CGRec
         CGContextSetShadowWithColor(c, CGSizeZero, 0, NULL);
         int m = p[P_CFMODE];
         CGContextSetBlendMode(c, m == 3 ? kCGBlendModeNormal : blend_of(m));
-        if (m == 13 && clip) { CGContextSaveGState(c); clip(c, ctx); CGContextFillRect(c, CGRectInset(area, -2, -2)); CGContextRestoreGState(c); }
-        else CGContextFillRect(c, CGRectInset(area, -2, -2));
+        if (clip) {
+            CGContextSaveGState(c);
+            clip(c, ctx);
+            CGContextFillRect(c, area);
+            CGContextRestoreGState(c);
+        } else {
+            CGContextFillRect(c, area);
+        }
         CGContextEndTransparencyLayer(c);
     }
     CGContextRestoreGState(c);
@@ -536,9 +542,13 @@ struct image_clip { CGImageRef img; CGAffineTransform t; CGRect r; };
 static void clip_image(CGContextRef c, const void *ctx)
 {
     const struct image_clip *ic = ctx;
-    CGContextConcatCTM(c, ic->t);
-    CGContextClipToMask(c, ic->r, ic->img);
-    CGContextConcatCTM(c, CGAffineTransformInvert(ic->t));
+    if (!ic || !ic->img) return;
+    CGImageAlphaInfo a = CGImageGetAlphaInfo(ic->img);
+    if (a == kCGImageAlphaOnly) {
+        CGContextConcatCTM(c, ic->t);
+        CGContextClipToMask(c, ic->r, ic->img);
+        CGContextConcatCTM(c, CGAffineTransformInvert(ic->t));
+    }
 }
 
 /* Draw the path now in the context with this paint (fill, stroke or both; through the shader when there is one). */

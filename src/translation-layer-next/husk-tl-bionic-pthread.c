@@ -43,6 +43,7 @@ typedef struct { uint32_t value; _Atomic uint32_t magic; void *host; } guest_obj
  * from the guest's flags word. */
 static void *obj_host(void *g, void *(*make)(uint32_t value))
 {
+    if (!g || (uintptr_t)g < 0x1000ull) return NULL;
     guest_obj *o = g;
     uint32_t m = atomic_load_explicit(&o->magic, memory_order_acquire);
     for (;;) {
@@ -68,6 +69,7 @@ static void *make_mutex(uint32_t value)
     pthread_mutexattr_init(&a);
     pthread_mutexattr_settype(&a, type == 1 ? PTHREAD_MUTEX_RECURSIVE : type == 2 ? PTHREAD_MUTEX_ERRORCHECK : PTHREAD_MUTEX_NORMAL);
     pthread_mutex_t *m = malloc(sizeof(*m));
+    if (!m) return NULL;
     pthread_mutex_init(m, &a);
     pthread_mutexattr_destroy(&a);
     return m;
@@ -75,6 +77,7 @@ static void *make_mutex(uint32_t value)
 
 static int b_mutex_init(void *g, const long *attr)
 {
+    if (!g || (uintptr_t)g < 0x1000ull) return 22;
     guest_obj *o = g;
     memset(g, 0, 40);
     unsigned type = attr ? (unsigned)(*attr & 0xf) : 0;
@@ -83,8 +86,11 @@ static int b_mutex_init(void *g, const long *attr)
 }
 static int b_mutex_destroy(void *g)
 {
+    if (!g || (uintptr_t)g < 0x1000ull) return 22;
     guest_obj *o = g;
-    if (atomic_load(&o->magic) == MAGIC_READY) { pthread_mutex_destroy(o->host); free(o->host); }
+    if (atomic_load(&o->magic) == MAGIC_READY) {
+        if (o->host) { pthread_mutex_destroy(o->host); free(o->host); o->host = NULL; }
+    }
     uint32_t v = o->value;
     memset(g, 0, 40);
     o->value = v;
@@ -106,7 +112,9 @@ static void describe_site(char *out, size_t n, uint64_t addr)
 }
 static int b_mutex_lock(void *g)
 {
+    if (!g || (uintptr_t)g < 0x1000ull) return 22;
     pthread_mutex_t *m = obj_host(g, make_mutex);
+    if (!m) return 22;
     if (!mutex_trace()) return rc(pthread_mutex_lock(m));
     void *lr = __builtin_return_address(0);
     for (long i = 0;; i++) {
@@ -125,8 +133,23 @@ static int b_mutex_lock(void *g)
         }
     }
 }
-static int b_mutex_trylock(void *g) { int r = pthread_mutex_trylock(obj_host(g, make_mutex)); if (r == 0 && mutex_trace()) note_owner(g, __builtin_return_address(0)); return rc(r); }
-static int b_mutex_unlock(void *g)  { if (mutex_trace()) ((uint64_t *)g)[2] = 0; return rc(pthread_mutex_unlock(obj_host(g, make_mutex))); }
+static int b_mutex_trylock(void *g)
+{
+    if (!g || (uintptr_t)g < 0x1000ull) return 22;
+    pthread_mutex_t *m = obj_host(g, make_mutex);
+    if (!m) return 22;
+    int r = pthread_mutex_trylock(m);
+    if (r == 0 && mutex_trace()) note_owner(g, __builtin_return_address(0));
+    return rc(r);
+}
+static int b_mutex_unlock(void *g)
+{
+    if (!g || (uintptr_t)g < 0x1000ull) return 22;
+    pthread_mutex_t *m = obj_host(g, make_mutex);
+    if (!m) return 22;
+    if (mutex_trace()) ((uint64_t *)g)[2] = 0;
+    return rc(pthread_mutex_unlock(m));
+}
 
 static int b_mutexattr_init(long *a)    { *a = 0; return 0; }
 static int b_mutexattr_destroy(long *a) { (void)a; return 0; }
@@ -153,6 +176,7 @@ static void *make_cond(uint32_t value)
 
 static int b_cond_init(void *g, const long *attr)
 {
+    if (!g || (uintptr_t)g < 0x1000ull) return 22;
     guest_obj *o = g;
     memset(g, 0, 48);
     o->value = attr ? (uint32_t)(*attr & 3) : 0;
@@ -160,44 +184,44 @@ static int b_cond_init(void *g, const long *attr)
 }
 static int b_cond_destroy(void *g)
 {
+    if (!g || (uintptr_t)g < 0x1000ull) return 22;
     guest_obj *o = g;
-    if (atomic_load(&o->magic) == MAGIC_READY) { pthread_cond_destroy(o->host); free(o->host); }
+    if (atomic_load(&o->magic) == MAGIC_READY) {
+        if (o->host) { pthread_cond_destroy(o->host); free(o->host); o->host = NULL; }
+    }
     memset(g, 0, 48);
     return 0;
 }
-static int b_cond_signal(void *g)    { return rc(pthread_cond_signal(obj_host(g, make_cond))); }
-static int b_cond_broadcast(void *g) { return rc(pthread_cond_broadcast(obj_host(g, make_cond))); }
+static int b_cond_signal(void *g)    { pthread_cond_t *c = obj_host(g, make_cond); return c ? rc(pthread_cond_signal(c)) : 22; }
+static int b_cond_broadcast(void *g) { pthread_cond_t *c = obj_host(g, make_cond); return c ? rc(pthread_cond_broadcast(c)) : 22; }
 static int b_cond_wait(void *g, void *m)
 {
-    return rc(pthread_cond_wait(obj_host(g, make_cond), obj_host(m, make_mutex)));
+    pthread_cond_t *c = obj_host(g, make_cond);
+    pthread_mutex_t *pm = obj_host(m, make_mutex);
+    if (!c || !pm) return 22;
+    return rc(pthread_cond_wait(c, pm));
+}
+
+static int cond_wait_until(void *g, void *m, clockid_t clk, const struct timespec *abs)
+{
+    if (!abs) return 22;
+    pthread_cond_t *c = obj_host(g, make_cond);
+    pthread_mutex_t *pm = obj_host(m, make_mutex);
+    if (!c || !pm) return 22;
+    struct timespec now, rel;
+    clock_gettime(clk, &now);
+    rel.tv_sec = abs->tv_sec - now.tv_sec;
+    rel.tv_nsec = abs->tv_nsec - now.tv_nsec;
+    if (rel.tv_nsec < 0) { rel.tv_sec--; rel.tv_nsec += 1000000000L; }
+    if (rel.tv_sec < 0) { rel.tv_sec = 0; rel.tv_nsec = 0; }
+    return rc(pthread_cond_timedwait_relative_np(c, pm, &rel));
 }
 
 static int b_cond_timedwait(void *g, void *m, const struct timespec *abs)
 {
     guest_obj *o = g;
-    obj_host(g, make_cond);
-    clockid_t clk = (o->value & 2) ? CLOCK_MONOTONIC : CLOCK_REALTIME;
-    struct timespec now, rel;
-    clock_gettime(clk, &now);
-    rel.tv_sec = abs->tv_sec - now.tv_sec;
-    rel.tv_nsec = abs->tv_nsec - now.tv_nsec;
-    if (rel.tv_nsec < 0) { rel.tv_sec--; rel.tv_nsec += 1000000000L; }
-    if (rel.tv_sec < 0) { rel.tv_sec = 0; rel.tv_nsec = 0; }
-    return rc(pthread_cond_timedwait_relative_np(o->host, obj_host(m, make_mutex), &rel));
-}
-
-/* Bionic's clock ids: 0 is CLOCK_REALTIME, 1 CLOCK_MONOTONIC. */
-static int cond_wait_until(void *g, void *m, clockid_t clk, const struct timespec *abs)
-{
-    guest_obj *o = g;
-    obj_host(g, make_cond);
-    struct timespec now, rel;
-    clock_gettime(clk, &now);
-    rel.tv_sec = abs->tv_sec - now.tv_sec;
-    rel.tv_nsec = abs->tv_nsec - now.tv_nsec;
-    if (rel.tv_nsec < 0) { rel.tv_sec--; rel.tv_nsec += 1000000000L; }
-    if (rel.tv_sec < 0) { rel.tv_sec = 0; rel.tv_nsec = 0; }
-    return rc(pthread_cond_timedwait_relative_np(o->host, obj_host(m, make_mutex), &rel));
+    clockid_t clk = (o && (o->value & 2)) ? CLOCK_MONOTONIC : CLOCK_REALTIME;
+    return cond_wait_until(g, m, clk, abs);
 }
 
 static int b_cond_clockwait(void *g, void *m, int clock, const struct timespec *abs)
@@ -226,22 +250,26 @@ static void *make_rwlock(uint32_t value)
 {
     (void)value;
     pthread_rwlock_t *l = malloc(sizeof(*l));
+    if (!l) return NULL;
     pthread_rwlock_init(l, NULL);
     return l;
 }
-static int b_rwlock_init(void *g, const void *attr) { (void)attr; memset(g, 0, 56); return 0; }
+static int b_rwlock_init(void *g, const void *attr) { (void)attr; if (!g || (uintptr_t)g < 0x1000ull) return 22; memset(g, 0, 56); return 0; }
 static int b_rwlock_destroy(void *g)
 {
+    if (!g || (uintptr_t)g < 0x1000ull) return 22;
     guest_obj *o = g;
-    if (atomic_load(&o->magic) == MAGIC_READY) { pthread_rwlock_destroy(o->host); free(o->host); }
+    if (atomic_load(&o->magic) == MAGIC_READY) {
+        if (o->host) { pthread_rwlock_destroy(o->host); free(o->host); o->host = NULL; }
+    }
     memset(g, 0, 56);
     return 0;
 }
-static int b_rwlock_rdlock(void *g)    { return rc(pthread_rwlock_rdlock(obj_host(g, make_rwlock))); }
-static int b_rwlock_wrlock(void *g)    { return rc(pthread_rwlock_wrlock(obj_host(g, make_rwlock))); }
-static int b_rwlock_tryrdlock(void *g) { return rc(pthread_rwlock_tryrdlock(obj_host(g, make_rwlock))); }
-static int b_rwlock_trywrlock(void *g) { return rc(pthread_rwlock_trywrlock(obj_host(g, make_rwlock))); }
-static int b_rwlock_unlock(void *g)    { return rc(pthread_rwlock_unlock(obj_host(g, make_rwlock))); }
+static int b_rwlock_rdlock(void *g)    { pthread_rwlock_t *l = obj_host(g, make_rwlock); return l ? rc(pthread_rwlock_rdlock(l)) : 22; }
+static int b_rwlock_wrlock(void *g)    { pthread_rwlock_t *l = obj_host(g, make_rwlock); return l ? rc(pthread_rwlock_wrlock(l)) : 22; }
+static int b_rwlock_tryrdlock(void *g) { pthread_rwlock_t *l = obj_host(g, make_rwlock); return l ? rc(pthread_rwlock_tryrdlock(l)) : 22; }
+static int b_rwlock_trywrlock(void *g) { pthread_rwlock_t *l = obj_host(g, make_rwlock); return l ? rc(pthread_rwlock_trywrlock(l)) : 22; }
+static int b_rwlock_unlock(void *g)    { pthread_rwlock_t *l = obj_host(g, make_rwlock); return l ? rc(pthread_rwlock_unlock(l)) : 22; }
 
 /* ---------------------------------------------------------------- semaphores */
 
@@ -252,6 +280,7 @@ typedef struct { pthread_mutex_t m; pthread_cond_t c; int count; } host_sem;
 static void *make_sem(uint32_t value)
 {
     host_sem *s = calloc(1, sizeof(*s));
+    if (!s) return NULL;
     pthread_mutex_init(&s->m, NULL);
     pthread_cond_init(&s->c, NULL);
     s->count = (int)value;
@@ -261,6 +290,7 @@ static void *make_sem(uint32_t value)
 static int b_sem_init(void *g, int pshared, unsigned value)
 {
     (void)pshared;
+    if (!g || (uintptr_t)g < 0x1000ull) { tl_set_guest_errno(22); return -1; }
     guest_obj *o = g;
     memset(g, 0, 16);
     o->host = make_sem(value);
@@ -269,18 +299,23 @@ static int b_sem_init(void *g, int pshared, unsigned value)
 }
 static int b_sem_destroy(void *g)
 {
+    if (!g || (uintptr_t)g < 0x1000ull) { tl_set_guest_errno(22); return -1; }
     guest_obj *o = g;
     if (atomic_load(&o->magic) == MAGIC_READY) {
         host_sem *s = o->host;
-        pthread_cond_destroy(&s->c); pthread_mutex_destroy(&s->m); free(s);
+        if (s) { pthread_cond_destroy(&s->c); pthread_mutex_destroy(&s->m); free(s); o->host = NULL; }
     }
     memset(g, 0, 16);
     return 0;
 }
-static host_sem *hs(void *g) { return obj_host(g, make_sem); }
+static host_sem *hs(void *g) {
+    if (!g || (uintptr_t)g < 0x1000ull) return NULL;
+    return obj_host(g, make_sem);
+}
 static int b_sem_post(void *g)
 {
     host_sem *s = hs(g);
+    if (!s) { tl_set_guest_errno(22); return -1; }
     pthread_mutex_lock(&s->m);
     s->count++;
     pthread_cond_signal(&s->c);
@@ -290,6 +325,7 @@ static int b_sem_post(void *g)
 static int b_sem_wait(void *g)
 {
     host_sem *s = hs(g);
+    if (!s) { tl_set_guest_errno(22); return -1; }
     pthread_mutex_lock(&s->m);
     while (s->count <= 0) pthread_cond_wait(&s->c, &s->m);
     s->count--;
@@ -299,6 +335,7 @@ static int b_sem_wait(void *g)
 static int b_sem_trywait(void *g)
 {
     host_sem *s = hs(g);
+    if (!s) { tl_set_guest_errno(22); return -1; }
     int ok = 0;
     pthread_mutex_lock(&s->m);
     if (s->count > 0) { s->count--; ok = 1; }
@@ -309,6 +346,7 @@ static int b_sem_trywait(void *g)
 static int b_sem_timedwait(void *g, const struct timespec *abs)
 {
     host_sem *s = hs(g);
+    if (!s || !abs) { tl_set_guest_errno(22); return -1; }
     struct timespec now, rel;
     clock_gettime(CLOCK_REALTIME, &now);
     rel.tv_sec = abs->tv_sec - now.tv_sec;
@@ -326,8 +364,12 @@ static int b_sem_timedwait(void *g, const struct timespec *abs)
 static int b_sem_getvalue(void *g, int *v)
 {
     host_sem *s = hs(g);
+    if (!s || !v) { tl_set_guest_errno(22); return -1; }
     pthread_mutex_lock(&s->m);
     *v = s->count;
+    pthread_mutex_unlock(&s->m);
+    return 0;
+}
     pthread_mutex_unlock(&s->m);
     return 0;
 }

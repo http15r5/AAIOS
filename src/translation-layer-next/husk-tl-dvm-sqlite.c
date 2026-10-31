@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 
 #include "husk-tl-dvm-internal.h"
 
@@ -20,6 +21,18 @@ static jvalue D(double d) { jvalue r; r.d = d; return r; }
 static jvalue L(void *p) { jvalue r; r.j = 0; r.l = p; return r; }
 #define DB ((sqlite3 *)(uintptr_t)a[0].j)
 #define ST ((sqlite3_stmt *)(uintptr_t)a[0].j)
+#define VALID_PTR(p) ((p) != NULL && (uintptr_t)(p) >= 0x1000ull)
+
+static void sqlite_mkdirs(const char *path)
+{
+    if (!path || !*path) return;
+    char tmp[1024]; snprintf(tmp, sizeof(tmp), "%s", path);
+    char *slash = strrchr(tmp, '/');
+    if (!slash) return;
+    *slash = '\0';
+    for (char *p = tmp + 1; *p; p++) if (*p == '/') { *p = 0; mkdir(tmp, 0755); *p = '/'; }
+    mkdir(tmp, 0755);
+}
 
 static int coll_nocase(void *u, int la, const void *a, int lb, const void *b)
 {
@@ -47,6 +60,7 @@ NAT(S_open)
     char resolved[1024];
     extern const char *tl_path_resolve(const char *path, char *buf, size_t n);
     if (path && strcmp(path, ":memory:")) path = tl_path_resolve(path, resolved, sizeof(resolved));
+    if (path && strcmp(path, ":memory:")) sqlite_mkdirs(path);
     sqlite3 *db = NULL;
     int rc = sqlite3_open_v2(path ? path : ":memory:", &db, flags, NULL);
     if (rc != SQLITE_OK) {
@@ -62,81 +76,110 @@ NAT(S_open)
     *ret = J((int64_t)(uintptr_t)db);
     return true;
 }
-NAT(S_close) { (void)self; (void)ret; if (DB) sqlite3_close_v2(DB); return true; }
-NAT(S_errmsg) { (void)self; *ret = L(dvm_new_string_utf8(DB ? sqlite3_errmsg(DB) : g_open_error)); return true; }
-NAT(S_errcode) { (void)self; *ret = I(DB ? sqlite3_extended_errcode(DB) : SQLITE_CANTOPEN); return true; }
+NAT(S_close) { (void)self; (void)ret; if (VALID_PTR(DB)) sqlite3_close_v2(DB); return true; }
+NAT(S_errmsg) { (void)self; *ret = L(dvm_new_string_utf8(VALID_PTR(DB) ? sqlite3_errmsg(DB) : g_open_error)); return true; }
+NAT(S_errcode) { (void)self; *ret = I(VALID_PTR(DB) ? sqlite3_extended_errcode(DB) : SQLITE_CANTOPEN); return true; }
 NAT(S_exec)
 {
     (void)self;
+    if (!VALID_PTR(DB)) { *ret = I(SQLITE_MISUSE); return true; }
     const char *sql = tl_jni_string(a[1].l);
     *ret = I(sql ? sqlite3_exec(DB, sql, NULL, NULL, NULL) : SQLITE_MISUSE);
     return true;
 }
-NAT(S_changes) { (void)self; *ret = I(sqlite3_changes(DB)); return true; }
-NAT(S_lastInsertRowid) { (void)self; *ret = J(sqlite3_last_insert_rowid(DB)); return true; }
-NAT(S_autocommit) { (void)self; *ret = I(sqlite3_get_autocommit(DB)); return true; }
-NAT(S_busyTimeout) { (void)self; (void)ret; sqlite3_busy_timeout(DB, a[1].i); return true; }
+NAT(S_changes) { (void)self; *ret = I(VALID_PTR(DB) ? sqlite3_changes(DB) : 0); return true; }
+NAT(S_lastInsertRowid) { (void)self; *ret = J(VALID_PTR(DB) ? sqlite3_last_insert_rowid(DB) : 0); return true; }
+NAT(S_autocommit) { (void)self; *ret = I(VALID_PTR(DB) ? sqlite3_get_autocommit(DB) : 1); return true; }
+NAT(S_busyTimeout) { (void)self; (void)ret; if (VALID_PTR(DB)) sqlite3_busy_timeout(DB, a[1].i); return true; }
 NAT(S_prepare)
 {
     (void)self;
+    if (!VALID_PTR(DB)) { *ret = J(0); return true; }
     const char *sql = tl_jni_string(a[1].l);
     sqlite3_stmt *st = NULL;
     if (!sql || sqlite3_prepare_v2(DB, sql, -1, &st, NULL) != SQLITE_OK) st = NULL;
     *ret = J((int64_t)(uintptr_t)st);
     return true;
 }
-NAT(S_finalize) { (void)self; (void)ret; if (ST) sqlite3_finalize(ST); return true; }
-NAT(S_reset) { (void)self; *ret = I(sqlite3_reset(ST)); return true; }
-NAT(S_clearBindings) { (void)self; (void)ret; sqlite3_clear_bindings(ST); return true; }
-NAT(S_paramCount) { (void)self; *ret = I(sqlite3_bind_parameter_count(ST)); return true; }
-NAT(S_readOnly) { (void)self; *ret = I(sqlite3_stmt_readonly(ST)); return true; }
-NAT(S_bindNull) { (void)self; *ret = I(sqlite3_bind_null(ST, a[1].i)); return true; }
-NAT(S_bindLong) { (void)self; *ret = I(sqlite3_bind_int64(ST, a[1].i, a[2].j)); return true; }
-NAT(S_bindDouble) { (void)self; *ret = I(sqlite3_bind_double(ST, a[1].i, a[2].d)); return true; }
+NAT(S_finalize) { (void)self; (void)ret; if (VALID_PTR(ST)) sqlite3_finalize(ST); return true; }
+NAT(S_reset) { (void)self; *ret = I(VALID_PTR(ST) ? sqlite3_reset(ST) : SQLITE_OK); return true; }
+NAT(S_clearBindings) { (void)self; (void)ret; if (VALID_PTR(ST)) sqlite3_clear_bindings(ST); return true; }
+NAT(S_paramCount) { (void)self; *ret = I(VALID_PTR(ST) ? sqlite3_bind_parameter_count(ST) : 0); return true; }
+NAT(S_readOnly) { (void)self; *ret = I(VALID_PTR(ST) ? sqlite3_stmt_readonly(ST) : 0); return true; }
+NAT(S_bindNull) { (void)self; *ret = I(VALID_PTR(ST) ? sqlite3_bind_null(ST, a[1].i) : SQLITE_MISUSE); return true; }
+NAT(S_bindLong) { (void)self; *ret = I(VALID_PTR(ST) ? sqlite3_bind_int64(ST, a[1].i, a[2].j) : SQLITE_MISUSE); return true; }
+NAT(S_bindDouble) { (void)self; *ret = I(VALID_PTR(ST) ? sqlite3_bind_double(ST, a[1].i, a[2].d) : SQLITE_MISUSE); return true; }
 NAT(S_bindString)
 {
     (void)self;
-    int32_t n; const uint16_t *s = tl_dvm_string_chars(a[2].l, &n);
+    if (!VALID_PTR(ST)) { *ret = I(SQLITE_MISUSE); return true; }
+    jobj *str = a[2].l;
+    if (!VALID_PTR(str)) { *ret = I(sqlite3_bind_null(ST, a[1].i)); return true; }
+    int32_t n = 0; const uint16_t *s = tl_dvm_string_chars(str, &n);
     *ret = I(s ? sqlite3_bind_text16(ST, a[1].i, s, n * 2, SQLITE_TRANSIENT) : sqlite3_bind_null(ST, a[1].i));
     return true;
 }
 NAT(S_bindBlob)
 {
     (void)self;
+    if (!VALID_PTR(ST)) { *ret = I(SQLITE_MISUSE); return true; }
     jobj *b = a[2].l;
-    *ret = I(b ? sqlite3_bind_blob(ST, a[1].i, b->arr.data, (int)b->arr.len, SQLITE_TRANSIENT) : sqlite3_bind_null(ST, a[1].i));
+    if (!VALID_PTR(b) || b->kind != TL_K_PRIM_ARRAY || !b->arr.data) {
+        *ret = I(sqlite3_bind_null(ST, a[1].i));
+        return true;
+    }
+    *ret = I(sqlite3_bind_blob(ST, a[1].i, b->arr.data, (int)b->arr.len, SQLITE_TRANSIENT));
     return true;
 }
-NAT(S_step) { (void)self; *ret = I(sqlite3_step(ST)); return true; }
-NAT(S_columnCount) { (void)self; *ret = I(sqlite3_column_count(ST)); return true; }
-NAT(S_columnName) { (void)self; const char *n = sqlite3_column_name(ST, a[1].i); *ret = L(dvm_new_string_utf8(n ? n : "")); return true; }
+NAT(S_step) { (void)self; *ret = I(VALID_PTR(ST) ? sqlite3_step(ST) : SQLITE_DONE); return true; }
+NAT(S_columnCount) { (void)self; *ret = I(VALID_PTR(ST) ? sqlite3_column_count(ST) : 0); return true; }
+NAT(S_columnName)
+{
+    (void)self;
+    if (!VALID_PTR(ST)) { *ret = L(dvm_new_string_utf8("")); return true; }
+    const char *n = sqlite3_column_name(ST, a[1].i);
+    *ret = L(dvm_new_string_utf8(n ? n : ""));
+    return true;
+}
 /* Android's Cursor field types: NULL 0, INTEGER 1, FLOAT 2, STRING 3, BLOB 4 */
 NAT(S_columnType)
 {
     (void)self;
+    if (!VALID_PTR(ST)) { *ret = I(0); return true; }
     int t = sqlite3_column_type(ST, a[1].i);
     *ret = I(t == SQLITE_INTEGER ? 1 : t == SQLITE_FLOAT ? 2 : t == SQLITE_TEXT ? 3 : t == SQLITE_BLOB ? 4 : 0);
     return true;
 }
-NAT(S_columnLong) { (void)self; *ret = J(sqlite3_column_int64(ST, a[1].i)); return true; }
-NAT(S_columnDouble) { (void)self; *ret = D(sqlite3_column_double(ST, a[1].i)); return true; }
+NAT(S_columnLong) { (void)self; *ret = J(VALID_PTR(ST) ? sqlite3_column_int64(ST, a[1].i) : 0); return true; }
+NAT(S_columnDouble) { (void)self; *ret = D(VALID_PTR(ST) ? sqlite3_column_double(ST, a[1].i) : 0.0); return true; }
 NAT(S_columnText)
 {
     (void)self;
-    const void *s = sqlite3_column_text16(ST, a[1].i);
-    int n = sqlite3_column_bytes16(ST, a[1].i);
-    *ret = L(s ? tl_dvm_string_u16(s, n / 2) : NULL);
+    if (!VALID_PTR(ST)) { *ret = L(NULL); return true; }
+    int col = a[1].i;
+    if (sqlite3_column_type(ST, col) == SQLITE_NULL) { *ret = L(NULL); return true; }
+    const void *s = sqlite3_column_text16(ST, col);
+    int n = sqlite3_column_bytes16(ST, col);
+    if (!s || n <= 0) {
+        *ret = L(tl_dvm_string_u16((const uint16_t *)u"", 0));
+        return true;
+    }
+    *ret = L(tl_dvm_string_u16(s, n / 2));
     return true;
 }
 NAT(S_columnBlob)
 {
     (void)self;
-    const void *b = sqlite3_column_blob(ST, a[1].i);
-    int n = sqlite3_column_bytes(ST, a[1].i);
-    if (!b && sqlite3_column_type(ST, a[1].i) == SQLITE_NULL) { *ret = L(NULL); return true; }
+    if (!VALID_PTR(ST)) { *ret = L(NULL); return true; }
+    int col = a[1].i;
+    if (sqlite3_column_type(ST, col) == SQLITE_NULL) { *ret = L(NULL); return true; }
+    const void *b = sqlite3_column_blob(ST, col);
+    int n = sqlite3_column_bytes(ST, col);
+    if (n < 0) n = 0;
     jobj *arr = tl_jni_new_prim_array('B', (uint32_t)n);
+    if (!arr) { *ret = L(NULL); return true; }
     arr->refs = 1u << 30;
-    if (n) memcpy(arr->arr.data, b, (size_t)n);
+    if (n > 0 && b && arr->arr.data) memcpy(arr->arr.data, b, (size_t)n);
     *ret = L(arr);
     return true;
 }

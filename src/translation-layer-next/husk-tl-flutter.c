@@ -615,12 +615,19 @@ static void *platform_main(void *arg)
     /* FlutterLoader.ensureInitializationComplete: the engine's command line, then FlutterJNI.init. */
     char cache[700], lib[64] = "--aot-shared-library-name=libapp.so";
     snprintf(cache, sizeof(cache), "--cache-dir-path=%s/cache", F.data);
-    /* --no-enable-merged-platform-ui-thread: Flutter 3.29 and later run Dart on the platform thread by default, and work posted to
-     * that merged queue from our input path is never run by the platform loop as it is driven here. Apps can turn the merge off in
-     * their manifest (DisableMergedPlatformUIThread); this does the same, and Dart gets its own UI thread as it had before 3.29.
-     * Older engines ignore the switch. */
-    const char *args[] = { "--icu-symbol-prefix=_binary_icudtl_dat", lib, cache, "--leak-vm=true", getenv("TL_FLUTTER_ARGS") };
-    int nargs = getenv("TL_FLUTTER_ARGS") ? 5 : 4;
+    /* Impeller OpenGLES backend on iOS ANativeWindow is unstable; disable Impeller so Flutter uses the robust Skia GLES backend.
+     * --no-enable-merged-platform-ui-thread: Flutter 3.29 and later run Dart on the platform thread by default, so keep Dart UI thread separate. */
+    const char *args[16];
+    int nargs = 0;
+    args[nargs++] = "--icu-symbol-prefix=_binary_icudtl_dat";
+    args[nargs++] = lib;
+    args[nargs++] = cache;
+    args[nargs++] = "--leak-vm=true";
+    args[nargs++] = "--enable-impeller=false";
+    args[nargs++] = "--no-enable-impeller";
+    args[nargs++] = "--no-enable-merged-platform-ui-thread";
+    const char *extra = getenv("TL_FLUTTER_ARGS");
+    if (extra && *extra) args[nargs++] = extra;
     jobj *jargs = tl_jni_new_obj_array(tl_jni_class("java/lang/String"), (uint32_t)nargs);
     for (int i = 0; i < nargs; i++) jargs->oarr.v[i] = tl_jni_new_string(args[i]);
     char files[700], caches[700];
