@@ -2296,7 +2296,7 @@ static tl_lib *map_library(const char *name, uint8_t *file, size_t flen)
     bool go = memmem(file, flen, go_magic, sizeof(go_magic) - 1) != NULL;
     /* Stub pages after the image: one literal slot, a few probes, a stub for every raw
      * system call, and one for every instruction that names the reserved register x18. */
-    size_t stub_bytes = 16 + 8192;
+    size_t stub_bytes = 16 + 32768;
     for (int r = 0; r < ncode; r++) {
         const uint32_t *wv = (const uint32_t *)(file + code[r].foff);
         for (size_t k = 0, cnt = (size_t)(code[r].size / 4); k < cnt; k++) {
@@ -2313,7 +2313,7 @@ static tl_lib *map_library(const char *name, uint8_t *file, size_t flen)
                 stub_bytes += X18_STUB_BYTES;
         }
     }
-    size_t nstub = (stub_bytes + PAGE - 1) / PAGE;
+    size_t nstub = (stub_bytes + PAGE - 1) / PAGE + 4;
     if (!vx18_init()) tl_log_line("ld: no thread-specific slot for the virtual x18; instructions using x18 will not be rewritten");
 
     uint8_t *rx, *rw, *dup = NULL;

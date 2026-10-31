@@ -25,12 +25,33 @@
 
 /* ------------------------------------------------------------ operator new/delete */
 
+#define HUSK_MMAP_MAGIC 0x4855534B4D4D4150ull /* "HUSKMMAP" */
+
+typedef struct {
+    uint64_t magic;
+    size_t size;
+    uint64_t reserved[2];
+} husk_mmap_hdr_t;
+
 static void *b_new(size_t n)
 {
     size_t sz = n ? n : 1;
     void *p = malloc(sz);
     if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
-    if (!p) p = calloc(1, sz);
+    if (!p) {
+        void *ptr = NULL;
+        if (posix_memalign(&ptr, 16, (sz + 15) & ~15ul) == 0) p = ptr;
+    }
+    if (!p) {
+        size_t psz = (sz + sizeof(husk_mmap_hdr_t) + 0x3FFF) & ~0x3FFFull;
+        void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+        if (m != MAP_FAILED) {
+            husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)m;
+            hdr->magic = HUSK_MMAP_MAGIC;
+            hdr->size = psz;
+            p = (void *)(hdr + 1);
+        }
+    }
     if (!p) {
         tl_log_line("cxx: operator new(%zu) failed out of memory", n);
         abort();
@@ -43,7 +64,20 @@ static void *b_new_nothrow(size_t n, const void *nt)
     size_t sz = n ? n : 1;
     void *p = malloc(sz);
     if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
-    if (!p) p = calloc(1, sz);
+    if (!p) {
+        void *ptr = NULL;
+        if (posix_memalign(&ptr, 16, (sz + 15) & ~15ul) == 0) p = ptr;
+    }
+    if (!p) {
+        size_t psz = (sz + sizeof(husk_mmap_hdr_t) + 0x3FFF) & ~0x3FFFull;
+        void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+        if (m != MAP_FAILED) {
+            husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)m;
+            hdr->magic = HUSK_MMAP_MAGIC;
+            hdr->size = psz;
+            p = (void *)(hdr + 1);
+        }
+    }
     return p;
 }
 static void *b_new_aligned(size_t n, size_t align)
@@ -66,15 +100,33 @@ static void *b_new_aligned_nothrow(size_t n, size_t align, const void *nt)
     if (posix_memalign(&p, align, sz) == 0 && p) return p;
     p = malloc(sz);
     if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
+    if (!p) p = b_new_nothrow(sz, NULL);
     return p;
 }
 static void b_delete(void *p)
 {
-    if (p) free(p);
+    if (!p || (uintptr_t)p < 0x10000ull) return;
+    if (((uintptr_t)p & 0x3FFF) == sizeof(husk_mmap_hdr_t)) {
+        husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)p - 1;
+        if (hdr->magic == HUSK_MMAP_MAGIC) {
+            size_t psz = hdr->size;
+            if (psz >= 0x4000 && (psz & 0x3FFF) == 0 && psz < 0x40000000ull) {
+                hdr->magic = 0;
+                munmap(hdr, psz);
+                return;
+            }
+        }
+    }
+    malloc_zone_t *z = malloc_zone_from_ptr(p);
+    if (z) {
+        malloc_zone_free(z, p);
+    } else if (malloc_size(p) > 0) {
+        free(p);
+    }
 }
-static void b_delete_sized(void *p, size_t n) { (void)n; if (p) free(p); }
-static void b_delete_aligned(void *p, size_t align) { (void)align; if (p) free(p); }
-static void b_delete_sized_aligned(void *p, size_t n, size_t align) { (void)n; (void)align; if (p) free(p); }
+static void b_delete_sized(void *p, size_t n) { (void)n; b_delete(p); }
+static void b_delete_aligned(void *p, size_t align) { (void)align; b_delete(p); }
+static void b_delete_sized_aligned(void *p, size_t n, size_t align) { (void)n; (void)align; b_delete(p); }
 
 static void b_cxa_pure_virtual(void)
 {

@@ -737,6 +737,13 @@ bool tl_dvm_declares(tl_jclass *jc, const char *name, const char *sig)
 
 bool dvm_instance_of(jobj *o, tl_jclass *c) { return o && dvm_assignable(dvm_object_class(o), c); }
 
+/* The interpreter's call stack, per thread: what Reflection.getCallerClass and stack traces read. */
+_Thread_local dvm_method *t_frames[8192];
+_Thread_local uint32_t t_pcs[8192];             /* each frame's pc at its last call out: the line a stack trace shows */
+_Thread_local int t_depth;
+_Thread_local bool t_overflowing;
+_Thread_local uintptr_t t_stack_low;
+
 /* ================================================================== exceptions */
 
 bool dvm_throw(const char *cls, const char *fmt, ...)
@@ -747,7 +754,8 @@ bool dvm_throw(const char *cls, const char *fmt, ...)
     if (!jc) jc = tl_jni_class(cls);
     dvm_class *c = dvm_class_of(jc);
     jobj *e = dvm_new_object(jc);
-    if (c) {
+    if (!e) return false;
+    if (c && !t_overflowing && t_depth < 350) {
         dvm_ensure_init(c);
         dvm_method *init = dvm_find_method(c, "<init>", "(Ljava/lang/String;)V", false);
         jvalue a; a.l = fmt ? dvm_new_string_utf8(msg) : NULL;
@@ -920,12 +928,6 @@ static int arg_words(const dvm_method *m)
     return w;
 }
 
-/* The interpreter's call stack, per thread: what Reflection.getCallerClass and stack traces read. */
-_Thread_local dvm_method *t_frames[8192];
-_Thread_local uint32_t t_pcs[8192];             /* each frame's pc at its last call out: the line a stack trace shows */
-_Thread_local int t_depth;
-_Thread_local bool t_overflowing;
-_Thread_local uintptr_t t_stack_low;
 
 /* The source line of a pc in a method, from its debug info; -1 without one. */
 int dvm_line_of(dvm_method *m, uint32_t pc)
