@@ -266,6 +266,7 @@ static void GAH_make(tl_jcall *c)
 static const struct { const char *name, *super; } k_classes[] = {
     { "dalvik/system/BaseDexClassLoader", "java/lang/ClassLoader" }, { "dalvik/system/DexClassLoader", "dalvik/system/BaseDexClassLoader" },
     { TASK, "java/lang/Object" },
+    { "com/google/android/gms/tasks/NativeOnCompleteListener", "java/lang/Object" },
     { "com/google/android/gms/common/api/ApiException", "java/lang/Exception" },
     { "com/google/android/gms/common/GoogleApiAvailabilityLight", "java/lang/Object" },
     { "com/google/android/gms/common/GoogleApiAvailability", "com/google/android/gms/common/GoogleApiAvailabilityLight" },
@@ -324,6 +325,7 @@ static const tl_jhle k_gms[] = {
     M("dalvik/system/DexClassLoader", "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/ClassLoader;)V", CL_init),
 
     /* Task */
+    M("com/google/android/gms/tasks/NativeOnCompleteListener", "createAndAddCallback", "(Lcom/google/android/gms/tasks/Task;J)V", Noop),
     M(TASK, "isComplete", "()Z", Task_isComplete), M(TASK, "isSuccessful", "()Z", Task_isSuccessful),
     M(TASK, "isCanceled", "()Z", RetFalse),
     M(TASK, "getResult", "()Ljava/lang/Object;", Task_getResult), M(TASK, "getException", "()Ljava/lang/Exception;", Task_getException),

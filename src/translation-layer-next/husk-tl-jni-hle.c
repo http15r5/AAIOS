@@ -208,6 +208,8 @@ static void Display_getRefreshRate(tl_jcall *c) { c->ret = vf(60.f); }
 static void Display_getDisplayId(tl_jcall *c) { c->ret = vi(0); }
 static void Display_getWidth(tl_jcall *c) { c->ret = vi(H.width); }
 static void Display_getHeight(tl_jcall *c) { c->ret = vi(H.height); }
+static void Display_getAppVsyncOffset(tl_jcall *c) { c->ret = vj(0); }
+static void Display_getPresentationDeadline(tl_jcall *c) { c->ret = vj(11666666LL); }
 static void Display_getName(tl_jcall *c) { c->ret = vl(STR("Built-in Screen")); }
 /* One mode, the screen's own: newer players ask the display for its modes and read the first one. A null answer (the
  * unimplemented default) is what they then dereference. */
@@ -1080,6 +1082,8 @@ static const tl_jhle k_hle[] = {
     M("android/view/Display", "getRealMetrics", "(Landroid/util/DisplayMetrics;)V", Display_getMetrics),
     M("android/view/Display", "getRotation", "()I", Display_getRotation),
     M("android/view/Display", "getRefreshRate", "()F", Display_getRefreshRate),
+    M("android/view/Display", "getAppVsyncOffsetNanos", "()J", Display_getAppVsyncOffset),
+    M("android/view/Display", "getPresentationDeadlineNanos", "()J", Display_getPresentationDeadline),
     M("android/view/Display", "getDisplayId", "()I", Display_getDisplayId),
     M("android/view/Display", "getWidth", "()I", Display_getWidth), M("android/view/Display", "getHeight", "()I", Display_getHeight),
     M("android/view/Display", "getName", "()Ljava/lang/String;", Display_getName),

@@ -375,6 +375,52 @@ static void XAL_appContext(tl_jcall *c) { c->ret = vl(M.activity); }
 static void XAL_locale(tl_jcall *c) { c->ret = vl(STR("en-US")); }
 static void Playfab_uuid(tl_jcall *c) { char u[40]; new_uuid(u, true); c->ret = vl(STR(u)); }
 static void DateTime_is24(tl_jcall *c) { c->ret = vz(0); }
+static void MA_brazeManager(tl_jcall *c) { c->ret = vl(make("com/mojang/minecraftpe/BrazeManager")); }
+
+static const uint8_t k_p256_gx[32] = {
+    0x6b, 0x17, 0xd1, 0xf2, 0xe1, 0x2c, 0x42, 0x47,
+    0xf8, 0xbc, 0xe6, 0xe5, 0x63, 0xa4, 0x40, 0xf2,
+    0x77, 0x03, 0x7d, 0x81, 0x2d, 0xeb, 0x33, 0xa0,
+    0xf4, 0xa1, 0x39, 0x45, 0xd8, 0x98, 0xc2, 0x96
+};
+static const uint8_t k_p256_gy[32] = {
+    0x4f, 0xe3, 0x42, 0xe2, 0xfe, 0x1a, 0x7f, 0x9b,
+    0x8e, 0xe7, 0xeb, 0x4a, 0x7c, 0x0f, 0x9e, 0x16,
+    0x2b, 0xce, 0x33, 0x57, 0x6b, 0x31, 0x5e, 0xce,
+    0xcb, 0xb6, 0x40, 0x68, 0x37, 0xbf, 0x51, 0xf5
+};
+
+static void Ecc_getBytes(tl_jcall *c)
+{
+    jobj *a = tl_jni_new_prim_array('B', 65);
+    if (a && a->arr.data) {
+        uint8_t *p = (uint8_t *)a->arr.data;
+        p[0] = 0x04;
+        memcpy(p + 1, k_p256_gx, 32);
+        memcpy(p + 33, k_p256_gy, 32);
+    }
+    c->ret = vl(a);
+}
+static void Ecc_getX(tl_jcall *c)
+{
+    jobj *a = tl_jni_new_prim_array('B', 32);
+    if (a && a->arr.data) memcpy(a->arr.data, k_p256_gx, 32);
+    c->ret = vl(a);
+}
+static void Ecc_getY(tl_jcall *c)
+{
+    jobj *a = tl_jni_new_prim_array('B', 32);
+    if (a && a->arr.data) memcpy(a->arr.data, k_p256_gy, 32);
+    c->ret = vl(a);
+}
+static void Ecdsa_getPublicKey(tl_jcall *c) { c->ret = vl(make("com/microsoft/xal/crypto/EccPubKey")); }
+static void Ecdsa_restoreKeyAndId(tl_jcall *c) { c->ret = vl(make("com/microsoft/xal/crypto/Ecdsa")); }
+static void Ecdsa_sign(tl_jcall *c)
+{
+    jobj *a = tl_jni_new_prim_array('B', 64);
+    if (a && a->arr.data) arc4random_buf(a->arr.data, 64);
+    c->ret = vl(a);
+}
 
 /* ------------------------------------------------------------- class loader */
 
@@ -420,6 +466,7 @@ static const struct { const char *name, *super; } k_classes[] = {
     { "java/lang/ClassNotFoundException", "java/lang/Exception" }, { "android/os/LocaleList", "java/lang/Object" }, { "com/microsoft/xal/androidjava/DeviceInfo", "java/lang/Object" }, { "com/microsoft/xal/androidjava/Storage", "java/lang/Object" },
     { "com/microsoft/xal/crypto/SecureRandom", "java/lang/Object" }, { "com/microsoft/xbox/idp/interop/Interop", "java/lang/Object" },
     { "com/microsoft/xboxlive/LocalStorage", "java/lang/Object" }, { "com/microsoft/playfab/utilities/multiplayer/AndroidJniHelperMultiplayer", "java/lang/Object" },
+    { "com/microsoft/xal/crypto/Ecdsa", "java/lang/Object" }, { "com/microsoft/xal/crypto/EccPubKey", "java/lang/Object" },
 };
 
 #define MAIN "com/mojang/minecraftpe/MainActivity"
@@ -477,6 +524,9 @@ static const tl_jhle k_hle[] = {
     M_(MAIN, "setMulticastReferenceCounting", "(Z)V", Noop), M_(MAIN, "isMulticastHeld", "()Z", RetFalse),
     M_(MAIN, "isTTSEnabled", "()Z", RetFalse), M_(MAIN, "isTTSInstalled", "()Z", RetFalse), M_(MAIN, "isTextToSpeechInProgress", "()Z", RetFalse),
     M_(MAIN, "supportsTTSLanguage", "(Ljava/lang/String;)Z", RetFalse),
+    M_(MAIN, "getBrazeManager", "()Lcom/mojang/minecraftpe/BrazeManager;", MA_brazeManager),
+    M_(MAIN, "setTTSLanguage", "(Ljava/lang/String;)V", Noop),
+    M_(MAIN, "stopTextToSpeech", "()V", Noop),
 
     M_(HWI, "getBoard", "()Ljava/lang/String;", HW_board), M_(HWI, "getCPUFeatures", "()Ljava/lang/String;", HW_cpuFeatures),
     M_(HWI, "getCPUName", "()Ljava/lang/String;", HW_cpuName), M_(HWI, "getCPUType", "()Ljava/lang/String;", HW_cpuType),
@@ -514,6 +564,19 @@ static const tl_jhle k_hle[] = {
     M_("com/microsoft/xal/androidjava/XalInitTelemetry", "initOneDS", "(Landroid/content/Context;)V", Noop),
     M_("com/microsoft/xal/androidjava/PresenceManager", "attach", "()V", Noop),
     M_("com/microsoft/xal/crypto/SecureRandom", "GenerateRandomBytes", "(I)[B", XAL_randomBytes),
+    M_("com/microsoft/xal/crypto/Ecdsa", "restoreKeyAndId", "(Landroid/content/Context;)Lcom/microsoft/xal/crypto/Ecdsa;", Ecdsa_restoreKeyAndId),
+    M_("com/microsoft/xal/crypto/Ecdsa", "<init>", "()V", Noop),
+    M_("com/microsoft/xal/crypto/Ecdsa", "generateKey", "(Ljava/lang/String;)V", Noop),
+    M_("com/microsoft/xal/crypto/Ecdsa", "getPublicKey", "()Lcom/microsoft/xal/crypto/EccPubKey;", Ecdsa_getPublicKey),
+    M_("com/microsoft/xal/crypto/Ecdsa", "storeKeyPairAndId", "(Landroid/content/Context;Ljava/lang/String;)Z", RetTrue),
+    M_("com/microsoft/xal/crypto/Ecdsa", "sign", "([B)[B", Ecdsa_sign),
+    M_("com/microsoft/xal/crypto/Ecdsa", "sign", "(Ljava/lang/String;)[B", Ecdsa_sign),
+    M_("com/microsoft/xal/crypto/Ecdsa", "signSha256", "([B)[B", Ecdsa_sign),
+    M_("com/microsoft/xal/crypto/EccPubKey", "getBytes", "()[B", Ecc_getBytes),
+    M_("com/microsoft/xal/crypto/EccPubKey", "getPublicKey", "()[B", Ecc_getBytes),
+    M_("com/microsoft/xal/crypto/EccPubKey", "getEncoded", "()[B", Ecc_getBytes),
+    M_("com/microsoft/xal/crypto/EccPubKey", "getX", "()[B", Ecc_getX),
+    M_("com/microsoft/xal/crypto/EccPubKey", "getY", "()[B", Ecc_getY),
     M_("com/microsoft/xbox/idp/interop/Interop", "GetLocalStoragePath", "(Landroid/content/Context;)Ljava/lang/String;", XAL_storagePath),
     M_("com/microsoft/xbox/idp/interop/Interop", "getApplicationContext", "()Landroid/content/Context;", XAL_appContext),
     M_("com/microsoft/xbox/idp/interop/Interop", "getLocale", "()Ljava/lang/String;", XAL_locale),

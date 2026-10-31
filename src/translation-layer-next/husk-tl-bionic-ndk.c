@@ -637,24 +637,26 @@ static unsigned long b_deflateBound(void *strm, unsigned long n) { (void)strm; r
 static void b_AAsset_close(tl_asset *a) { if (a) { free(a->owned); free(a); } }
 static int b_AAsset_read(tl_asset *a, void *buf, size_t n)
 {
-    size_t left = a->len - a->pos;
+    if (!a || !buf) return -1;
+    size_t left = a->len > a->pos ? a->len - a->pos : 0;
     if (n > left) n = left;
-    memcpy(buf, a->data + a->pos, n);
+    if (n > 0 && a->data) memcpy(buf, a->data + a->pos, n);
     a->pos += n;
     return (int)n;
 }
-static long b_AAsset_getLength(tl_asset *a) { return (long)a->len; }
-static long b_AAsset_getRemainingLength(tl_asset *a) { return (long)(a->len - a->pos); }
-static const void *b_AAsset_getBuffer(tl_asset *a) { return a->data; }
+static long b_AAsset_getLength(tl_asset *a) { return a ? (long)a->len : -1; }
+static long b_AAsset_getRemainingLength(tl_asset *a) { return a ? (long)(a->len > a->pos ? a->len - a->pos : 0) : -1; }
+static const void *b_AAsset_getBuffer(tl_asset *a) { return a ? a->data : NULL; }
 static long b_AAsset_seek(tl_asset *a, long off, int whence)
 {
+    if (!a) return -1;
     long base = whence == 0 ? 0 : whence == 1 ? (long)a->pos : (long)a->len;
     long np = base + off;
     if (np < 0 || (size_t)np > a->len) return -1;
     a->pos = (size_t)np;
     return np;
 }
-static int b_AAsset_isAllocated(tl_asset *a) { return a->owned != NULL; }
+static int b_AAsset_isAllocated(tl_asset *a) { return a && a->owned != NULL; }
 /* a descriptor on the APK and the asset's place in it, for an asset stored uncompressed; -1 for a compressed one (as Android does) */
 bool tl_assetstream_stored(const char *name, int *fd, int64_t *off, int64_t *len);
 static int b_AAsset_openFileDescriptor64(tl_asset *a, int64_t *start, int64_t *len)
@@ -988,6 +990,16 @@ static int b_ANativeWindow_setBuffersGeometry(tl_nwindow *w, int width, int heig
     return 0;
 }
 static void *b_ANativeWindow_toSurface(void *env, void *w) { (void)env; (void)w; return NULL; }
+static int b_ANativeWindow_setFrameRate(tl_nwindow *w, float frameRate, int8_t compatibility)
+{
+    (void)w; (void)frameRate; (void)compatibility;
+    return 0;
+}
+static int b_ANativeWindow_setFrameRateWithChangeStrategy(tl_nwindow *w, float frameRate, int8_t compatibility, int8_t changeFrameRateStrategy)
+{
+    (void)w; (void)frameRate; (void)compatibility; (void)changeFrameRateStrategy;
+    return 0;
+}
 
 /* ---------------------------------------------------------------- sensors */
 
@@ -1151,6 +1163,8 @@ const tl_bionic_entry tl_tab_ndk[] = {
     TL_WRAP("ANativeWindow_release", b_ANativeWindow_release), TL_WRAP("ANativeWindow_getWidth", b_ANativeWindow_getWidth),
     TL_WRAP("ANativeWindow_getHeight", b_ANativeWindow_getHeight), TL_WRAP("ANativeWindow_getFormat", b_ANativeWindow_getFormat),
     TL_WRAP("ANativeWindow_setBuffersGeometry", b_ANativeWindow_setBuffersGeometry),
+    TL_WRAP("ANativeWindow_setFrameRate", b_ANativeWindow_setFrameRate),
+    TL_WRAP("ANativeWindow_setFrameRateWithChangeStrategy", b_ANativeWindow_setFrameRateWithChangeStrategy),
     TL_WRAP("ANativeWindow_toSurface", b_ANativeWindow_toSurface), TL_WRAP("ANativeWindow_lock", b_ANativeWindow_lock),
     TL_WRAP("ANativeWindow_unlockAndPost", b_ANativeWindow_unlockAndPost),
     TL_WRAP("AInputQueue_attachLooper", b_AInputQueue_attachLooper), TL_WRAP("AInputQueue_detachLooper", b_AInputQueue_detachLooper),
