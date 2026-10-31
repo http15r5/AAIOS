@@ -370,9 +370,6 @@ static int b_sem_getvalue(void *g, int *v)
     pthread_mutex_unlock(&s->m);
     return 0;
 }
-    pthread_mutex_unlock(&s->m);
-    return 0;
-}
 
 /* --------------------------------------------------------------- once, keys */
 
