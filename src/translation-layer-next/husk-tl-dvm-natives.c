@@ -273,21 +273,40 @@ NAT(String_indexOfChar)
 /* new String(...) in bytecode, and StringFactory: the forms a string is made from */
 static jobj *from_bytes(jobj *b, int32_t off, int32_t len, int32_t hibyte)
 {
-    uint16_t *u = malloc((size_t)(len ? len : 1) * 2);
-    for (int32_t i = 0; i < len; i++) u[i] = (uint16_t)((hibyte & 0xFF) << 8 | ((uint8_t *)b->arr.data)[off + i]);
+    if (!b || b->kind != TL_K_PRIM_ARRAY || !b->arr.data || len <= 0) return tl_dvm_string_u16(NULL, 0);
+    if (off < 0) off = 0;
+    if ((uint32_t)off > b->arr.len) off = (int32_t)b->arr.len;
+    if ((uint32_t)(off + len) > b->arr.len) len = (int32_t)(b->arr.len - (uint32_t)off);
+    if (len <= 0) return tl_dvm_string_u16(NULL, 0);
+
+    uint16_t *u = malloc((size_t)len * 2);
+    if (!u) return tl_dvm_string_u16(NULL, 0);
+    for (int32_t i = 0; i < len; i++) u[i] = (uint16_t)(((hibyte & 0xFF) << 8) | ((uint8_t *)b->arr.data)[off + i]);
     jobj *s = tl_dvm_string_u16(u, len);
     free(u);
-    return s;
+    return s ? s : tl_dvm_string_u16(NULL, 0);
 }
 static jobj *from_utf8(const uint8_t *p, int32_t len)
 {
+    if (!p || len <= 0) return dvm_new_string_utf8("");
     char *z = malloc((size_t)len + 1);
+    if (!z) return dvm_new_string_utf8("");
     memcpy(z, p, (size_t)len); z[len] = 0;
     jobj *s = dvm_new_string_utf8(z);
     free(z);
-    return s;
+    return s ? s : dvm_new_string_utf8("");
 }
-NAT(SF_fromBytes) { (void)self; if (!a[0].l) return npe("bytes"); *ret = L(from_bytes(a[0].l, a[2].i, a[3].i, a[1].i)); return true; }
+NAT(SF_fromBytes)
+{
+    (void)self;
+    if (!a[0].l) return npe("bytes");
+    jobj *b = a[0].l;
+    int32_t hibyte = a[1].i, off = a[2].i, len = a[3].i;
+    if (b->kind != TL_K_PRIM_ARRAY || !b->arr.data || off < 0 || len < 0 || (uint32_t)(off + len) > b->arr.len)
+        return dvm_throw("java/lang/ArrayIndexOutOfBoundsException", "SF_fromBytes");
+    *ret = L(from_bytes(b, off, len, hibyte));
+    return true;
+}
 NAT(SF_fromChars)
 {
     (void)self;

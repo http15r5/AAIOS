@@ -760,6 +760,9 @@ static void *bionic_dlsym(void *handle, const char *name)
     }
     if (getenv("TL_DL_TRACE")) tl_log_line("dl: dlsym(%s) -> %s", name, r ? "found" : "missing");
     if (!r) {
+        if (strncmp(name, "kDart", 5) == 0 || strstr(name, "Snapshot") != NULL || strstr(name, "Data") != NULL) {
+            return NULL;
+        }
         tl_log_line("dl: ADAPTIVE: missing symbol %s; providing stub to prevent crash", name);
         void *tl_ld_make_stub(const char *name);
         r = tl_ld_make_stub(name);

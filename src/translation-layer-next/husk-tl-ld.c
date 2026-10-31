@@ -1353,7 +1353,6 @@ static void patch_image(tl_lib *L, size_t *n_tpidr, size_t *n_adrp, size_t *n_ad
         size_t nwords = (size_t)((L->code[r].end - L->code[r].start) / 4);
         size_t ndata;
         uint8_t *dmap = build_data_map(L, w, nwords, L->code[r].start, &ndata);
-        bool is_metasec = (strstr(L->name, "metasec") != NULL);
         for (size_t i = 0; i < nwords; i++) {
             uint32_t insn = w[i];
             const uint8_t *pc = x + i * 4;
@@ -1366,7 +1365,7 @@ static void patch_image(tl_lib *L, size_t *n_tpidr, size_t *n_adrp, size_t *n_ad
             if (dbg < 0) { const char *e = getenv("TL_X18_RANGE"); dbg = getenv("TL_X18_OFF") ? 1 : 0; if (e) { dbg = 2; sscanf(e, "%llx-%llx", (unsigned long long *)&dbg_lo, (unsigned long long *)&dbg_hi); } }
             uint64_t va = L->code[r].start + (uint64_t)i * 4;
             bool skip_dbg = dbg == 1 || (dbg == 2 && !(va >= dbg_lo && va < dbg_hi));
-            int xr = (is_data || skip_dbg || is_metasec) ? X18_NONE : x18_rewrite(L, &w[i], pc);
+            int xr = (is_data || skip_dbg) ? X18_NONE : x18_rewrite(L, &w[i], pc);
             if (is_data && x18_rewrite_would_apply(insn)) {
                 L->n_x18_data++;
                 if (G.verbosity >= 3) tl_log_line("ld: %s: x18 word %08x at +%#llx left alone", L->name, insn, (unsigned long long)(L->code[r].start + (uint64_t)i * 4));
@@ -1398,7 +1397,7 @@ static void patch_image(tl_lib *L, size_t *n_tpidr, size_t *n_adrp, size_t *n_ad
                         (*n_adrp)++;
                     }
                 }
-            } else if (!is_data && !is_metasec && insn == 0xD4000001u) {                       /* svc #0 */
+            } else if (!is_data && insn == 0xD4000001u) {                       /* svc #0 */
                 uint8_t *stub = svc_stub(L, pc);
                 int64_t off = stub ? ((int64_t)stub - (int64_t)pc) / 4 : 0;
                 if (stub && off > -(1 << 25) && off < (1 << 25)) {

@@ -206,7 +206,9 @@ static uint16_t *mutf8_to_u16(const char *s, int32_t *n)
 /* UTF-16 to UTF-8 (surrogate pairs joined; U+0000 as C0 80). */
 static char *u16_to_utf8(const uint16_t *s, int32_t n)
 {
+    if (!s || n <= 0) return strdup("");
     char *o = malloc((size_t)n * 3 + 1);
+    if (!o) return strdup("");
     size_t k = 0;
     for (int32_t i = 0; i < n; i++) {
         uint32_t c = s[i];
@@ -262,12 +264,17 @@ static tl_jclass *g_string_class;
 
 jobj *tl_dvm_string_u16(const uint16_t *s, int32_t n)
 {
+    static const uint16_t empty_u16 = 0;
+    if (!s || n <= 0) { s = &empty_u16; n = 0; }
     jobj *o = tl_jni_new_string("");
     if (!o) return NULL;
     free(o->str.utf8);
     o->str.utf8 = u16_to_utf8(s, n);
     o->str.u16 = malloc((size_t)(n ? n : 1) * 2);
-    if (n && o->str.u16) memcpy(o->str.u16, s, (size_t)n * 2);
+    if (o->str.u16) {
+        if (n && s) memcpy(o->str.u16, s, (size_t)n * 2);
+        else o->str.u16[0] = 0;
+    }
     o->str.len16 = n;
     o->refs = 1u << 30;
     if (g_string_class) { o->cls = g_string_class; dvm_slots(o); }
@@ -1007,8 +1014,8 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
         t_stack_low = top - sz + reserve;
     }
     uintptr_t sp = (uintptr_t)__builtin_frame_address(0);
-    /* the error is thrown with 32 KB still above t_stack_low, which its own calls may use */
-    if (t_depth > (t_overflowing ? 450 : 400) || (t_stack_low && sp < t_stack_low + (t_overflowing ? 0 : (32u << 10)))) {
+    /* the error is thrown with 8 KB still above t_stack_low, which its own calls may use; only check sp when depth > 150 to avoid false positives on deep native C++ stacks */
+    if (t_depth > (t_overflowing ? 500 : 450) || (t_depth > 150 && t_stack_low && sp < t_stack_low + (t_overflowing ? 0 : 8192))) {
         t_depth--;
         if (t_overflowing) return false;
         t_overflowing = true;

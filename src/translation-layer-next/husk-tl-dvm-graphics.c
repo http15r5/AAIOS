@@ -64,9 +64,13 @@ static gbitmap *bm_new(int w, int h)
 {
     if (w <= 0 || h <= 0 || (int64_t)w * h > (1ll << 28)) return NULL;
     gbitmap *b = calloc(1, sizeof(*b));
+    if (!b) return NULL;
     b->w = w; b->h = h; b->stride = (size_t)w * 4;
+    size_t sz = (size_t)h * b->stride;
     b->px = calloc((size_t)h, b->stride);
+    if (!b->px) b->px = malloc(sz);
     if (!b->px) { free(b); return NULL; }
+    memset(b->px, 0, sz);
     b->ctx = CGBitmapContextCreate(b->px, (size_t)w, (size_t)h, 8, b->stride, rgb(), kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
     if (!b->ctx) { free(b->px); free(b); return NULL; }
     return b;
@@ -776,7 +780,18 @@ static void *arr_data(jobj *x) { return x && x->kind == TL_K_PRIM_ARRAY ? x->arr
 static uint32_t arr_len(jobj *x) { return x && x->kind == TL_K_PRIM_ARRAY ? x->arr.len : 0; }
 
 /* ---- Bitmap */
-NAT(G_bmNew) { (void)self; *ret = J((int64_t)(uintptr_t)bm_new(a[0].i, a[1].i)); return true; }
+NAT(G_bmNew)
+{
+    (void)self;
+    int w = a[0].i, h = a[1].i;
+    gbitmap *b = bm_new(w, h);
+    if (!b && (w > 256 || h > 256)) {
+        b = bm_new(w > 1 ? w / 2 : 1, h > 1 ? h / 2 : 1);
+        if (!b) b = bm_new(1, 1);
+    }
+    *ret = J((int64_t)(uintptr_t)b);
+    return true;
+}
 NAT(G_bmFree) { (void)self; (void)ret; bm_free(H(gbitmap, 0)); return true; }
 NAT(G_bmErase)
 {

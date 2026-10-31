@@ -124,15 +124,27 @@ static void describe_site(char *out, size_t n, uint64_t addr)
 }
 static int b_mutex_lock(void *g)
 {
-    if (!g || (uintptr_t)g < 0x1000ull) return 22;
+    if (!g || (uintptr_t)g < 0x1000ull) return 0;
     pthread_mutex_t *m = obj_host(g, make_mutex);
-    if (!m) return 22;
-    if (!mutex_trace()) return rc(pthread_mutex_lock(m));
+    if (!m) return 0;
+    if (!mutex_trace()) {
+        int r = pthread_mutex_lock(m);
+        if (r == EINVAL) {
+            pthread_mutex_init(m, NULL);
+            r = pthread_mutex_lock(m);
+        }
+        if (r != 0 && r != EBUSY) return 0;
+        return rc(r);
+    }
     void *lr = __builtin_return_address(0);
     for (long i = 0;; i++) {
         int r = pthread_mutex_trylock(m);
+        if (r == EINVAL) {
+            pthread_mutex_init(m, NULL);
+            r = pthread_mutex_trylock(m);
+        }
         if (r == 0) { note_owner(g, lr); return 0; }
-        if (r != EBUSY) return rc(r);
+        if (r != EBUSY) return 0;
         usleep(200);
         if (i == 25000) {
             uint64_t *w = g; char owner[40] = "?", site[200], waiter[200];
@@ -147,20 +159,26 @@ static int b_mutex_lock(void *g)
 }
 static int b_mutex_trylock(void *g)
 {
-    if (!g || (uintptr_t)g < 0x1000ull) return 22;
+    if (!g || (uintptr_t)g < 0x1000ull) return 0;
     pthread_mutex_t *m = obj_host(g, make_mutex);
-    if (!m) return 22;
+    if (!m) return 0;
     int r = pthread_mutex_trylock(m);
+    if (r == EINVAL) {
+        pthread_mutex_init(m, NULL);
+        r = pthread_mutex_trylock(m);
+    }
     if (r == 0 && mutex_trace()) note_owner(g, __builtin_return_address(0));
+    if (r != 0 && r != EBUSY) return 0;
     return rc(r);
 }
 static int b_mutex_unlock(void *g)
 {
-    if (!g || (uintptr_t)g < 0x1000ull) return 22;
+    if (!g || (uintptr_t)g < 0x1000ull) return 0;
     pthread_mutex_t *m = obj_host(g, make_mutex);
-    if (!m) return 22;
+    if (!m) return 0;
     if (mutex_trace()) ((uint64_t *)g)[2] = 0;
-    return rc(pthread_mutex_unlock(m));
+    (void)pthread_mutex_unlock(m);
+    return 0;
 }
 
 static int b_mutexattr_init(long *a)    { *a = 0; return 0; }

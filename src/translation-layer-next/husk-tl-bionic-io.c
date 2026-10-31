@@ -2020,6 +2020,16 @@ static int b_utimensat(int dirfd, const char *path, const struct timespec ts[2],
     TL_ERRNO_END();
     return r;
 }
+static int b_futimesat(int dirfd, const char *path, const struct timeval tv[2])
+{
+    if (at_plain(dirfd, path)) return b_utimes(path, tv);
+    struct timespec ts[2];
+    if (tv) {
+        ts[0].tv_sec = tv[0].tv_sec; ts[0].tv_nsec = tv[0].tv_usec * 1000;
+        ts[1].tv_sec = tv[1].tv_sec; ts[1].tv_nsec = tv[1].tv_usec * 1000;
+    }
+    return b_utimensat(dirfd, path, tv ? ts : NULL, 0);
+}
 /* bionic's struct statvfs on LP64: the fields are all 8 bytes */
 typedef struct { uint64_t f_bsize, f_frsize, f_blocks, f_bfree, f_bavail, f_files, f_ffree, f_favail, f_fsid, f_flag, f_namemax; int32_t spare[6]; } guest_statvfs;
 static int b_statvfs(const char *p, guest_statvfs *g)
@@ -2040,10 +2050,10 @@ static long b_pathconf(const char *p, int name)
 }
 
 const tl_bionic_entry tl_tab_io2[] = {
-    TL_WRAP("openat", b_openat), TL_WRAP("__openat_2", b___openat_2), TL_WRAP("faccessat", b_faccessat), TL_WRAP("mkdirat", b_mkdirat),
+    TL_WRAP("openat", b_openat), TL_WRAP("openat64", b_openat), TL_WRAP("__openat_2", b___openat_2), TL_WRAP("faccessat", b_faccessat), TL_WRAP("mkdirat", b_mkdirat),
     TL_WRAP("readlinkat", b_readlinkat), TL_WRAP("__readlinkat_chk", b___readlinkat_chk), TL_WRAP("__readlink_chk", b___readlink_chk), TL_WRAP("renameat", b_renameat), TL_WRAP("symlinkat", b_symlinkat),
     TL_WRAP("__poll_chk", b___poll_chk), TL_WRAP("unlinkat", b_unlinkat), TL_WRAP("fchmodat", b_fchmodat), TL_WRAP("fchown", b_fchown),
-    TL_WRAP("chdir", b_chdir), TL_WRAP("utimensat", b_utimensat), TL_WRAP("stat64", b_stat), TL_WRAP("statvfs", b_statvfs),
+    TL_WRAP("chdir", b_chdir), TL_WRAP("utimensat", b_utimensat), TL_WRAP("futimesat", b_futimesat), TL_WRAP("stat64", b_stat), TL_WRAP("statvfs", b_statvfs),
     TL_WRAP("statvfs64", b_statvfs), TL_WRAP("pathconf", b_pathconf),
     TL_END
 };
