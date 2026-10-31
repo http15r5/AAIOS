@@ -221,12 +221,29 @@ public class Canvas {
     public boolean clipRegion(android.graphics.Region p0, android.graphics.Region.Op p1) { return false; }
     public void clipShader(android.graphics.Shader p0) {}
     public void concat(android.graphics.Matrix44 p0) {}
-    public void drawColor(long p0, android.graphics.BlendMode p1) {}
-    public void drawDoubleRoundRect(android.graphics.RectF p0, float[] p1, android.graphics.RectF p2, float[] p3, android.graphics.Paint p4) {}
-    public void drawPatch(android.graphics.NinePatch p0, android.graphics.Rect p1, android.graphics.Paint p2) {}
-    public void drawPatch(android.graphics.NinePatch p0, android.graphics.RectF p1, android.graphics.Paint p2) {}
+    public void drawColor(long p0, android.graphics.BlendMode p1) { drawColor(Color.toArgb(p0), p1); }
+    public void drawDoubleRoundRect(android.graphics.RectF p0, float[] p1, android.graphics.RectF p2, float[] p3, android.graphics.Paint p4) {
+        if (p0 == null || p4 == null) return;
+        Path path = new Path();
+        if (p1 != null) path.addRoundRect(p0, p1, Path.Direction.CW);
+        else path.addRect(p0, Path.Direction.CW);
+        if (p2 != null) {
+            Path inner = new Path();
+            if (p3 != null) inner.addRoundRect(p2, p3, Path.Direction.CW);
+            else inner.addRect(p2, Path.Direction.CW);
+            path.op(inner, Path.Op.DIFFERENCE);
+        }
+        drawPath(path, p4);
+    }
+    public void drawPatch(android.graphics.NinePatch p0, android.graphics.Rect p1, android.graphics.Paint p2) { if (p0 != null && p1 != null) p0.draw(this, p1, p2); }
+    public void drawPatch(android.graphics.NinePatch p0, android.graphics.RectF p1, android.graphics.Paint p2) { if (p0 != null && p1 != null) p0.draw(this, p1, p2); }
     public void drawRegion(android.graphics.Region p0, android.graphics.Paint p1) {}
-    public void drawTextRun(android.graphics.text.MeasuredText p0, int p1, int p2, int p3, int p4, float p5, float p6, boolean p7, android.graphics.Paint p8) {}
+    public void drawTextRun(android.graphics.text.MeasuredText p0, int p1, int p2, int p3, int p4, float p5, float p6, boolean p7, android.graphics.Paint p8) {
+        if (p0 != null && p0.getChars() != null) {
+            char[] chars = p0.getChars();
+            drawTextRun(chars, p1, p2 - p1, p3, p4 - p3, p5, p6, p7, p8);
+        }
+    }
     public long getNativeCanvasWrapper() { return 0L; }
     public boolean isHighContrastTextEnabled() { return false; }
     public void release() {}

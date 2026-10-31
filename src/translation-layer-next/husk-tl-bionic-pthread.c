@@ -442,7 +442,7 @@ typedef struct { uint32_t flags; uint32_t pad; void *stack_base; size_t stack_si
 _Static_assert(sizeof(guest_attr) == 56, "bionic pthread_attr_t is 56 bytes on LP64");
 _Static_assert(sizeof(guest_obj) <= 16, "guest_obj must fit bionic's smallest object, sem_t");
 #define GATTR_DETACHED 1u
-#define DEFAULT_STACK (1024u * 1024u)
+#define DEFAULT_STACK (2048u * 1024u)
 
 static int b_attr_init(guest_attr *a)
 {
@@ -482,6 +482,7 @@ static int b_attr_setguardsize(guest_attr *a, size_t n) { a->guard_size = n; ret
 static int b_attr_setscope(guest_attr *a, int scope) { (void)a; return scope == 0 ? 0 : 95; }    /* only PTHREAD_SCOPE_SYSTEM, as bionic */
 static int b_attr_getscope(const guest_attr *a, int *scope) { (void)a; *scope = 0; return 0; }
 static int b_attr_getstack(const guest_attr *a, void **base, size_t *size) { *base = a->stack_base; *size = a->stack_size; return 0; }
+static int b_attr_setstack(guest_attr *a, void *base, size_t size) { if (size < 16384) return 22; a->stack_base = base; a->stack_size = size; return 0; }
 
 static int b_getattr_np(pthread_t t, guest_attr *a)
 {
@@ -536,7 +537,7 @@ static int b_create(pthread_t *out, const guest_attr *attr, void *(*fn)(void *),
     pthread_attr_t a;
     pthread_attr_init(&a);
     size_t stack = attr && attr->stack_size ? attr->stack_size : DEFAULT_STACK;
-    if (stack < (1024u * 1024u)) stack = 1024u * 1024u;
+    if (stack < (2048u * 1024u)) stack = 2048u * 1024u;
     if (stack > (8u << 20)) stack = 8u << 20;
     stack = (stack + 16383) & ~(size_t)16383;
     pthread_attr_setstacksize(&a, stack);
@@ -545,6 +546,10 @@ static int b_create(pthread_t *out, const guest_attr *attr, void *(*fn)(void *),
     c->fn = fn; c->arg = arg;
     pthread_t t;
     int r = pthread_create(&t, &a, start_thunk, c);
+    if (r && stack > 2048 * 1024) {
+        pthread_attr_setstacksize(&a, 2048 * 1024);
+        r = pthread_create(&t, &a, start_thunk, c);
+    }
     if (r && stack > 1024 * 1024) {
         pthread_attr_setstacksize(&a, 1024 * 1024);
         r = pthread_create(&t, &a, start_thunk, c);
@@ -630,7 +635,7 @@ const tl_bionic_entry tl_tab_pthread[] = {
     TL_WRAP("pthread_getspecific", b_getspecific), TL_WRAP("pthread_setspecific", b_setspecific),
     TL_WRAP("pthread_attr_init", b_attr_init), TL_WRAP("pthread_attr_destroy", b_attr_destroy),
     TL_WRAP("pthread_attr_setdetachstate", b_attr_setdetachstate), TL_WRAP("pthread_attr_getdetachstate", b_attr_getdetachstate), TL_WRAP("pthread_attr_setstacksize", b_attr_setstacksize),
-    TL_WRAP("pthread_attr_getstacksize", b_attr_getstacksize), TL_WRAP("pthread_attr_getguardsize", b_attr_getguardsize), TL_WRAP("pthread_attr_setguardsize", b_attr_setguardsize), TL_WRAP("pthread_attr_setscope", b_attr_setscope), TL_WRAP("pthread_attr_getscope", b_attr_getscope), TL_WRAP("pthread_attr_getstack", b_attr_getstack),
+    TL_WRAP("pthread_attr_getstacksize", b_attr_getstacksize), TL_WRAP("pthread_attr_getguardsize", b_attr_getguardsize), TL_WRAP("pthread_attr_setguardsize", b_attr_setguardsize), TL_WRAP("pthread_attr_setscope", b_attr_setscope), TL_WRAP("pthread_attr_getscope", b_attr_getscope), TL_WRAP("pthread_attr_getstack", b_attr_getstack), TL_WRAP("pthread_attr_setstack", b_attr_setstack),
     TL_WRAP("pthread_attr_getschedparam", b_attr_getschedparam),
     TL_WRAP("pthread_attr_getschedpolicy", b_attr_getschedpolicy), TL_WRAP("pthread_attr_setinheritsched", b_attr_setinheritsched), TL_WRAP("pthread_attr_getinheritsched", b_attr_getinheritsched), TL_WRAP("pthread_attr_setschedpolicy", b_attr_setschedpolicy),
     TL_WRAP("pthread_getattr_np", b_getattr_np),

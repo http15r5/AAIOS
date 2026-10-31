@@ -151,7 +151,13 @@ static int64_t avail_memory(void)
 #endif
 }
 #define MEM_THRESHOLD (512ll << 20)
-static int64_t total_memory(void) { int64_t t = avail_memory() + (1ll << 30); uint64_t p = phys_memory(); if (p && (uint64_t)t > p) t = (int64_t)p; return t; }
+static int64_t total_memory(void)
+{
+    uint64_t p = phys_memory();
+    if (p >= (2ULL << 30)) return (int64_t)p;
+    int64_t a = avail_memory();
+    return a > (3ll << 30) ? a : (4ll << 30);
+}
 
 static jobj *string_array(const char *const *v, int n)
 {
@@ -201,13 +207,11 @@ static void MA_timeFromStart(tl_jcall *c)
 static void MA_totalMemory(tl_jcall *c) { c->ret = vj(total_memory()); }
 static void MA_freeMemory(tl_jcall *c) {
     int64_t a = avail_memory();
-    int64_t f = a > MEM_THRESHOLD ? a - MEM_THRESHOLD : a / 2;
-    c->ret = vj(f > (128ll << 20) ? f : (128ll << 20));
+    c->ret = vj(a > (512ll << 20) ? a : (1024ll << 20));
 }
 static void MA_memoryLimit(tl_jcall *c) {
     int64_t t = total_memory();
-    int64_t l = t > MEM_THRESHOLD ? t - MEM_THRESHOLD : t;
-    c->ret = vj(l > (1024ll << 20) ? l : (1024ll << 20));
+    c->ret = vj(t > (2048ll << 20) ? t : (2048ll << 20));
 }
 static void MA_lowMemoryThreshold(tl_jcall *c) { c->ret = vj(MEM_THRESHOLD); }
 static void MA_usedMemory(tl_jcall *c) { int64_t u = total_memory() - avail_memory(); c->ret = vj(u > 0 ? u : 0); }
@@ -538,6 +542,10 @@ static void MA_getImageData(tl_jcall *c)
     }
     if (!img) {
         jobj *arr = tl_jni_new_prim_array('I', 2);
+        if (arr && arr->arr.data) {
+            ((int32_t *)arr->arr.data)[0] = 0;
+            ((int32_t *)arr->arr.data)[1] = 0;
+        }
         c->ret = vl(arr);
         return;
     }
@@ -545,9 +553,14 @@ static void MA_getImageData(tl_jcall *c)
     size_t h = CGImageGetHeight(img);
     size_t npix = w * h;
     jobj *arr = tl_jni_new_prim_array('I', (uint32_t)(npix + 2));
-    if (!arr) {
+    if (!arr || !arr->arr.data) {
         CGImageRelease(img);
-        c->ret = vl(tl_jni_new_prim_array('I', 2));
+        jobj *empty = tl_jni_new_prim_array('I', 2);
+        if (empty && empty->arr.data) {
+            ((int32_t *)empty->arr.data)[0] = 0;
+            ((int32_t *)empty->arr.data)[1] = 0;
+        }
+        c->ret = vl(empty);
         return;
     }
     int32_t *data = (int32_t *)arr->arr.data;

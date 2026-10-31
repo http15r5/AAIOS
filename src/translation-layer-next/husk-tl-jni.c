@@ -189,6 +189,7 @@ jobj *tl_jni_new_prim_array(char etype, uint32_t len)
     if (!o) return NULL;
     o->arr.esz = esz_of(etype); o->arr.etype = etype; o->arr.len = len;
     o->arr.data = calloc(len ? len : 1, o->arr.esz);
+    if (!o->arr.data) return NULL;
     return o;
 }
 
@@ -200,6 +201,7 @@ jobj *tl_jni_new_obj_array(tl_jclass *elem, uint32_t len)
     if (!o) return NULL;
     o->oarr.len = len;
     o->oarr.v = calloc(len ? len : 1, sizeof(jobj *));
+    if (!o->oarr.v) return NULL;
     return o;
 }
 

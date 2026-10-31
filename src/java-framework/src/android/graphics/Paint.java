@@ -142,7 +142,7 @@ public class Paint {
     public MaskFilter setMaskFilter(MaskFilter m) { mMaskFilter = m; return m; }
     public void setShadowLayer(float radius, float dx, float dy, int color) { pf(P_SHRAD, radius); pf(P_SHDX, dx); pf(P_SHDY, dy); mP[P_SHCOL] = color; }
     public void setShadowLayer(float radius, float dx, float dy, long color) { setShadowLayer(radius, dx, dy, Color.toArgb(color)); }
-    public void clearShadowLayer() { pf(P_SHRAD, 0); }
+    public void clearShadowLayer() { pf(P_SHRAD, 0); mP[P_SHCOL] = 0; }
     public float getShadowLayerRadius() { return f(mP[P_SHRAD]); }
     public float getShadowLayerDx() { return f(mP[P_SHDX]); }
     public float getShadowLayerDy() { return f(mP[P_SHDY]); }
@@ -278,13 +278,13 @@ public class Paint {
     public float getRunCharacterAdvance(java.lang.CharSequence p0, int p1, int p2, int p3, int p4, boolean p5, int p6, float[] p7, int p8, android.graphics.RectF p9, android.graphics.Paint.RunInfo p10) { return 0f; }
     public float getRunCharacterAdvance(char[] p0, int p1, int p2, int p3, int p4, boolean p5, int p6, float[] p7, int p8) { return 0f; }
     public float getRunCharacterAdvance(char[] p0, int p1, int p2, int p3, int p4, boolean p5, int p6, float[] p7, int p8, android.graphics.RectF p9, android.graphics.Paint.RunInfo p10) { return 0f; }
-    public long getShadowLayerColorLong() { return 0L; }
+    public long getShadowLayerColorLong() { return Color.pack(mP[P_SHCOL]); }
     public void getTextPath(char[] p0, int p1, int p2, float p3, float p4, android.graphics.Path p5) {}
     public float getTextRunAdvances(char[] p0, int p1, int p2, int p3, int p4, boolean p5, float[] p6, int p7) { return 0f; }
     public int getTextRunCursor(java.lang.CharSequence p0, int p1, int p2, boolean p3, int p4, int p5) { return 0; }
     public int getTextRunCursor(java.lang.String p0, int p1, int p2, boolean p3, int p4, int p5) { return 0; }
     public int getTextRunCursor(char[] p0, int p1, int p2, boolean p3, int p4, int p5) { return 0; }
-    public boolean hasShadowLayer() { return false; }
+    public boolean hasShadowLayer() { return getShadowLayerRadius() > 0; }
     public void setBidiFlags(int p0) { huskFill.put("BidiFlags", Integer.valueOf(p0)); }
     public void setCompatibilityScaling(float p0) {}
     public void setFontVariationOverride(java.lang.String p0) { huskFill.put("FontVariationOverride", p0); }

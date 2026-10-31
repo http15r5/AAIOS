@@ -17,8 +17,8 @@ public class MeasuredText {
         public static final int HYPHENATION_MODE_FAST = 2;
         public static final int HYPHENATION_MODE_NONE = 0;
         public static final int HYPHENATION_MODE_NORMAL = 1;
-        public Builder(android.graphics.text.MeasuredText p0) {}
-        public Builder(char[] p0) {}
+        public Builder(android.graphics.text.MeasuredText p0) { if (p0 != null) huskProps.putAll(p0.huskProps); }
+        public Builder(char[] p0) { if (p0 != null) huskProps.put("Chars", p0); }
         public android.graphics.text.MeasuredText.Builder appendReplacementRun(android.graphics.Paint p0, int p1, float p2) { return this; }
         public android.graphics.text.MeasuredText.Builder appendStyleRun(android.graphics.Paint p0, int p1, boolean p2) { return this; }
         public android.graphics.text.MeasuredText.Builder appendStyleRun(android.graphics.Paint p0, android.graphics.text.LineBreakConfig p1, int p2, boolean p3) { return this; }

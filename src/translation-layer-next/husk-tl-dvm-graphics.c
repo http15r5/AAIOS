@@ -205,18 +205,37 @@ static CTFontRef font_with_cascade(CTFontRef f)
 {
     if (!f) return NULL;
     CFArrayRef cascade = CTFontCopyDefaultCascadeListForLanguages(f, NULL);
-    if (!cascade) return f;
+    CFMutableArrayRef mutCascade = cascade ? CFArrayCreateMutableCopy(NULL, 0, cascade) : CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+    if (cascade) CFRelease(cascade);
+    if (!mutCascade) return f;
+
+    static const CFStringRef fallbackNames[] = {
+        CFSTR("AppleColorEmoji"),
+        CFSTR(".AppleSystemUIFont"),
+        CFSTR("Apple Symbols"),
+        CFSTR("Symbol"),
+        CFSTR("Geneva"),
+        CFSTR("Menlo")
+    };
+    for (size_t i = 0; i < sizeof(fallbackNames) / sizeof(fallbackNames[0]); i++) {
+        CTFontDescriptorRef desc = CTFontDescriptorCreateWithNameAndSize(fallbackNames[i], 0.0);
+        if (desc) {
+            CFArrayAppendValue(mutCascade, desc);
+            CFRelease(desc);
+        }
+    }
+
     CTFontDescriptorRef baseDesc = CTFontCopyFontDescriptor(f);
-    if (!baseDesc) { CFRelease(cascade); return f; }
+    if (!baseDesc) { CFRelease(mutCascade); return f; }
     const void *keys[] = { kCTFontCascadeListAttribute };
-    const void *vals[] = { cascade };
+    const void *vals[] = { mutCascade };
     CFDictionaryRef attrs = CFDictionaryCreate(NULL, keys, vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     CTFontDescriptorRef cascadedDesc = attrs ? CTFontDescriptorCreateCopyWithAttributes(baseDesc, attrs) : NULL;
     CTFontRef outFont = cascadedDesc ? CTFontCreateWithFontDescriptor(cascadedDesc, CTFontGetSize(f), NULL) : NULL;
     if (cascadedDesc) CFRelease(cascadedDesc);
     if (attrs) CFRelease(attrs);
     CFRelease(baseDesc);
-    CFRelease(cascade);
+    CFRelease(mutCascade);
     if (outFont) {
         CFRelease(f);
         return outFont;
@@ -271,7 +290,11 @@ static CTFontRef sized(gface *g, float size)
     unsigned h = ((unsigned)(uintptr_t)g * 2654435761u ^ (unsigned)q * 40503u) % 512;
     pthread_mutex_lock(&lock);
     if (cache[h].g == g && cache[h].q == q) { CTFontRef f = cache[h].f; CFRetain(f); pthread_mutex_unlock(&lock); return f; }
-    CTFontRef f = CTFontCreateCopyWithAttributes(g->base, q / 8.0, NULL, NULL);
+    CTFontDescriptorRef desc = g->base ? CTFontCopyFontDescriptor(g->base) : NULL;
+    CTFontRef f = desc ? CTFontCreateWithFontDescriptor(desc, q / 8.0, NULL) : NULL;
+    if (desc) CFRelease(desc);
+    if (!f && g->base) f = font_with_cascade(CTFontCreateCopyWithAttributes(g->base, q / 8.0, NULL, NULL));
+    if (!f) f = font_with_cascade(CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, q / 8.0, NULL));
     if (cache[h].f) CFRelease(cache[h].f);
     cache[h].g = g; cache[h].q = q; cache[h].f = f;
     CFRetain(f);
