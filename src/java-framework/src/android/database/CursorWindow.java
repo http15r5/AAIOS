@@ -31,13 +31,18 @@ public class CursorWindow extends android.database.sqlite.SQLiteClosable impleme
         Object o = v(pos, col);
         if (o == null || o instanceof byte[]) return (byte[]) o;
         if (o instanceof String) return ((String) o).getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        throw new SQLiteExceptionHusk("INTEGER data in getBlob ");
+        if (o instanceof Long) return Long.toString((Long) o).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (o instanceof Double) return Double.toString((Double) o).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return new byte[0];
     }
     public String getString(int pos, int col) {
         Object o = v(pos, col);
         if (o == null || o instanceof String) return (String) o;
-        if (o instanceof byte[]) throw new SQLiteExceptionHusk("Unable to convert BLOB to string");
-        if (o instanceof Double) { double d = (Double) o; return d == Math.rint(d) && Math.abs(d) < 1e15 ? Double.toString(d) : Double.toString(d); }
+        if (o instanceof byte[]) {
+            try { return new String((byte[]) o, java.nio.charset.StandardCharsets.UTF_8); } catch (Throwable t) { return ""; }
+        }
+        if (o instanceof Double) { double d = (Double) o; return d == Math.rint(d) && Math.abs(d) < 1e15 ? Long.toString((long) d) : Double.toString(d); }
+        if (o instanceof Long) return Long.toString((Long) o);
         return o.toString();
     }
     public void copyStringToBuffer(int pos, int col, CharArrayBuffer buffer) { String s = getString(pos, col); if (s == null) { buffer.sizeCopied = 0; return; } char[] d = buffer.data; if (d == null || d.length < s.length()) buffer.data = s.toCharArray(); else s.getChars(0, s.length(), d, 0); buffer.sizeCopied = s.length(); }
@@ -47,7 +52,11 @@ public class CursorWindow extends android.database.sqlite.SQLiteClosable impleme
         if (o instanceof Long) return (Long) o;
         if (o instanceof Double) return (long) (double) (Double) o;
         if (o instanceof String) { try { return Long.parseLong(((String) o).trim()); } catch (NumberFormatException e) { try { return (long) Double.parseDouble(((String) o).trim()); } catch (NumberFormatException e2) { return 0; } } }
-        throw new SQLiteExceptionHusk("Unable to convert BLOB to long");
+        if (o instanceof byte[]) {
+            byte[] b = (byte[]) o;
+            try { return Long.parseLong(new String(b, java.nio.charset.StandardCharsets.UTF_8).trim()); } catch (Throwable t) { return 0; }
+        }
+        return 0;
     }
     public double getDouble(int pos, int col) {
         Object o = v(pos, col);
@@ -55,7 +64,11 @@ public class CursorWindow extends android.database.sqlite.SQLiteClosable impleme
         if (o instanceof Double) return (Double) o;
         if (o instanceof Long) return (Long) o;
         if (o instanceof String) { try { return Double.parseDouble(((String) o).trim()); } catch (NumberFormatException e) { return 0; } }
-        throw new SQLiteExceptionHusk("Unable to convert BLOB to double");
+        if (o instanceof byte[]) {
+            byte[] b = (byte[]) o;
+            try { return Double.parseDouble(new String(b, java.nio.charset.StandardCharsets.UTF_8).trim()); } catch (Throwable t) { return 0; }
+        }
+        return 0;
     }
     public short getShort(int pos, int col) { return (short) getLong(pos, col); }
     public int getInt(int pos, int col) { return (int) getLong(pos, col); }

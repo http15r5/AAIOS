@@ -96,11 +96,6 @@ static void *b_new_aligned_nothrow(size_t n, size_t align, const void *nt)
 static void b_delete(void *p)
 {
     if (!p || (uintptr_t)p < 0x100000ull) return;
-    malloc_zone_t *zone = malloc_zone_from_ptr(p);
-    if (zone) {
-        malloc_zone_free(zone, p);
-        return;
-    }
     if (malloc_size(p) > 0) {
         free(p);
         return;
@@ -113,6 +108,7 @@ static void b_delete(void *p)
             return;
         }
     }
+    free(p);
 }
 static void b_delete_sized(void *p, size_t n) { (void)n; b_delete(p); }
 static void b_delete_aligned(void *p, size_t align) { (void)align; b_delete(p); }

@@ -988,9 +988,7 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
     if (!m) { if (ret) ret->j = 0; return true; }
     if (t_depth < 8192) { t_frames[t_depth] = m; t_pcs[t_depth] = 0; }
     t_depth++;
-    /* past 8000 frames: StackOverflowError, which is made with calls of its own, so those get 200 frames more (a deeper one
-       throwing again would recurse without end) */
-    /* ...or when the thread's own stack is nearly used up: keep 64 KB for C */
+    /* past 400 frames: StackOverflowError (400 frames * ~1.5 KB frame fits safely on iOS thread stacks) */
     if (!t_stack_low) {
         pthread_t me = pthread_self();
         uintptr_t top = (uintptr_t)pthread_get_stackaddr_np(me);
@@ -1000,11 +998,12 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
     }
     uintptr_t sp = (uintptr_t)__builtin_frame_address(0);
     /* the error is thrown with 32 KB still above t_stack_low, which its own calls may use */
-    if (t_depth > (t_overflowing ? 8200 : 8000) || sp < t_stack_low + (t_overflowing ? 0 : (32u << 10))) {
+    if (t_depth > (t_overflowing ? 450 : 400) || (t_stack_low && sp < t_stack_low + (t_overflowing ? 0 : (32u << 10)))) {
         t_depth--;
         if (t_overflowing) return false;
         t_overflowing = true;
-        bool r = dvm_throw("java/lang/StackOverflowError", "stack size 8000 frames");
+        tl_log_line("dvm: stack overflow prevented at depth %d calling %s.%s%s", t_depth, m->cls ? m->cls->name : "?", m->name ? m->name : "?", m->sig ? m->sig : "?");
+        bool r = dvm_throw("java/lang/StackOverflowError", "stack size %d frames", t_depth);
         t_overflowing = false;
         return r;
     }

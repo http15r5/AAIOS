@@ -544,7 +544,7 @@ static void clip_image(CGContextRef c, const void *ctx)
     const struct image_clip *ic = ctx;
     if (!ic || !ic->img) return;
     CGImageAlphaInfo a = CGImageGetAlphaInfo(ic->img);
-    if (a == kCGImageAlphaOnly) {
+    if (a != kCGImageAlphaNone && a != kCGImageAlphaNoneSkipFirst && a != kCGImageAlphaNoneSkipLast) {
         CGContextConcatCTM(c, ic->t);
         CGContextClipToMask(c, ic->r, ic->img);
         CGContextConcatCTM(c, CGAffineTransformInvert(ic->t));

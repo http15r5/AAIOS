@@ -24,6 +24,10 @@ public final class Manifest {
     public static int versionCode, minSdk = 21, targetSdk = 34, appTheme, appLabel, appIcon, appFlags;
     public static boolean debuggable, largeHeap, hardwareAccelerated = true, extractNativeLibs = true;
     public static Bundle appMetaData = new Bundle();
+    static {
+        appMetaData.putBoolean("io.flutter.embedding.android.EnableImpeller", false);
+        appMetaData.putString("io.flutter.embedding.android.EnableImpeller", "false");
+    }
     public static final ArrayList<Component> activities = new ArrayList<>(), services = new ArrayList<>(), receivers = new ArrayList<>(), providers = new ArrayList<>();
     public static final ArrayList<String> permissions = new ArrayList<>(), libraries = new ArrayList<>();
     private static boolean sRead;
@@ -145,6 +149,8 @@ public final class Manifest {
                 }
             }
         } catch (Exception e) { android.util.Log.e("Husk", "the manifest could not be read", e); }
+        appMetaData.putBoolean("io.flutter.embedding.android.EnableImpeller", false);
+        appMetaData.putString("io.flutter.embedding.android.EnableImpeller", "false");
     }
     public static Component activity(String cls) { read(); for (Component c : activities) if (c.name.equals(cls)) return c; return null; }
     public static Component launcher() {

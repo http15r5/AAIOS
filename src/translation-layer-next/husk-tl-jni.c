@@ -1072,6 +1072,35 @@ static void jni_ReleaseStringCritical(void *env, jo s, const uint16_t *c) { jni_
 typedef struct { const char *name, *sig; void *fn; } native_method;
 static unsigned g_natives_generation;
 
+typedef void (*flutter_nativeInit_fn)(void *env, jo self, jo ctx, jo args, jo bPath, jo sPath, jo cPath, int64_t initTime);
+static flutter_nativeInit_fn g_orig_flutter_nativeInit;
+
+static void hooked_flutter_nativeInit(void *env, jo self, jo ctx, jo args, jo bPath, jo sPath, jo cPath, int64_t initTime)
+{
+    tl_log_line("flutter: intercepted nativeInit, forcing Impeller disabled");
+    if (args && args->kind == TL_K_OBJ_ARRAY) {
+        bool has_flag = false;
+        for (uint32_t i = 0; i < args->oarr.len; i++) {
+            jobj *item = args->oarr.v[i];
+            if (item && item->kind == TL_K_STRING && item->str.utf8) {
+                if (strstr(item->str.utf8, "enable-impeller")) {
+                    has_flag = true;
+                    free(item->str.utf8);
+                    item->str.utf8 = strdup("--enable-impeller=false");
+                    if (item->str.u16) { free(item->str.u16); item->str.u16 = NULL; }
+                }
+            }
+        }
+        if (!has_flag) {
+            uint32_t old_len = args->oarr.len;
+            args->oarr.v = realloc(args->oarr.v, (size_t)(old_len + 1) * sizeof(jobj *));
+            args->oarr.v[old_len] = tl_jni_new_string("--enable-impeller=false");
+            args->oarr.len = old_len + 1;
+        }
+    }
+    if (g_orig_flutter_nativeInit) g_orig_flutter_nativeInit(env, self, ctx, args, bPath, sPath, cPath, initTime);
+}
+
 static int32_t jni_RegisterNatives(void *env, jo cls, const native_method *m, int32_t n)
 {
     (void)env;
@@ -1088,9 +1117,14 @@ static int32_t jni_RegisterNatives(void *env, jo cls, const native_method *m, in
         c->natives = realloc(c->natives, (size_t)(c->nnatives + 1) * sizeof(*c->natives));
         c->natives[c->nnatives].name = strdup(m[i].name);
         c->natives[c->nnatives].sig = strdup(m[i].sig);
-        c->natives[c->nnatives].fn = m[i].fn;
+        void *target_fn = m[i].fn;
+        if (!strcmp(m[i].name, "nativeInit") && strstr(c->name, "FlutterJNI")) {
+            g_orig_flutter_nativeInit = (flutter_nativeInit_fn)m[i].fn;
+            target_fn = (void *)hooked_flutter_nativeInit;
+        }
+        c->natives[c->nnatives].fn = target_fn;
         c->nnatives++;
-        TRACE("jni: RegisterNatives %s.%s%s -> %p", c->name, m[i].name, m[i].sig, m[i].fn);
+        TRACE("jni: RegisterNatives %s.%s%s -> %p", c->name, m[i].name, m[i].sig, target_fn);
     }
     pthread_mutex_unlock(&g_lock);
     __atomic_add_fetch(&g_natives_generation, 1, __ATOMIC_RELEASE);

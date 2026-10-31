@@ -47,12 +47,21 @@ static void *obj_host(void *g, void *(*make)(uint32_t value))
     guest_obj *o = g;
     uint32_t m = atomic_load_explicit(&o->magic, memory_order_acquire);
     for (;;) {
-        if (m == MAGIC_READY) return o->host;
+        if (m == MAGIC_READY) {
+            void *h = o->host;
+            if (h) return h;
+            m = 0;
+        }
         if (m == MAGIC_INIT) { sched_yield(); m = atomic_load_explicit(&o->magic, memory_order_acquire); continue; }
         if (atomic_compare_exchange_weak_explicit(&o->magic, &m, MAGIC_INIT, memory_order_acq_rel, memory_order_acquire)) {
-            o->host = make(o->value);
+            void *h = make(o->value);
+            if (!h) {
+                atomic_store_explicit(&o->magic, 0, memory_order_release);
+                return NULL;
+            }
+            o->host = h;
             atomic_store_explicit(&o->magic, MAGIC_READY, memory_order_release);
-            return o->host;
+            return h;
         }
     }
 }
@@ -88,8 +97,11 @@ static int b_mutex_destroy(void *g)
 {
     if (!g || (uintptr_t)g < 0x1000ull) return 22;
     guest_obj *o = g;
-    if (atomic_load(&o->magic) == MAGIC_READY) {
-        if (o->host) { pthread_mutex_destroy(o->host); free(o->host); o->host = NULL; }
+    uint32_t expected = MAGIC_READY;
+    if (atomic_compare_exchange_strong(&o->magic, &expected, 0)) {
+        void *h = o->host;
+        o->host = NULL;
+        if (h) { pthread_mutex_destroy((pthread_mutex_t *)h); free(h); }
     }
     uint32_t v = o->value;
     memset(g, 0, 40);
@@ -186,8 +198,11 @@ static int b_cond_destroy(void *g)
 {
     if (!g || (uintptr_t)g < 0x1000ull) return 22;
     guest_obj *o = g;
-    if (atomic_load(&o->magic) == MAGIC_READY) {
-        if (o->host) { pthread_cond_destroy(o->host); free(o->host); o->host = NULL; }
+    uint32_t expected = MAGIC_READY;
+    if (atomic_compare_exchange_strong(&o->magic, &expected, 0)) {
+        void *h = o->host;
+        o->host = NULL;
+        if (h) { pthread_cond_destroy((pthread_cond_t *)h); free(h); }
     }
     memset(g, 0, 48);
     return 0;
@@ -196,6 +211,7 @@ static int b_cond_signal(void *g)    { pthread_cond_t *c = obj_host(g, make_cond
 static int b_cond_broadcast(void *g) { pthread_cond_t *c = obj_host(g, make_cond); return c ? rc(pthread_cond_broadcast(c)) : 22; }
 static int b_cond_wait(void *g, void *m)
 {
+    if (!g || (uintptr_t)g < 0x1000ull || !m || (uintptr_t)m < 0x1000ull) return 22;
     pthread_cond_t *c = obj_host(g, make_cond);
     pthread_mutex_t *pm = obj_host(m, make_mutex);
     if (!c || !pm) return 22;
@@ -204,7 +220,7 @@ static int b_cond_wait(void *g, void *m)
 
 static int cond_wait_until(void *g, void *m, clockid_t clk, const struct timespec *abs)
 {
-    if (!abs) return 22;
+    if (!g || (uintptr_t)g < 0x1000ull || !m || (uintptr_t)m < 0x1000ull || !abs) return 22;
     pthread_cond_t *c = obj_host(g, make_cond);
     pthread_mutex_t *pm = obj_host(m, make_mutex);
     if (!c || !pm) return 22;
@@ -259,8 +275,11 @@ static int b_rwlock_destroy(void *g)
 {
     if (!g || (uintptr_t)g < 0x1000ull) return 22;
     guest_obj *o = g;
-    if (atomic_load(&o->magic) == MAGIC_READY) {
-        if (o->host) { pthread_rwlock_destroy(o->host); free(o->host); o->host = NULL; }
+    uint32_t expected = MAGIC_READY;
+    if (atomic_compare_exchange_strong(&o->magic, &expected, 0)) {
+        void *h = o->host;
+        o->host = NULL;
+        if (h) { pthread_rwlock_destroy((pthread_rwlock_t *)h); free(h); }
     }
     memset(g, 0, 56);
     return 0;
