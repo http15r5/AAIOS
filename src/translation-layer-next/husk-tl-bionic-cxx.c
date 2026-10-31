@@ -29,7 +29,20 @@ static void *b_new(size_t n)
 {
     size_t sz = n ? n : 1;
     void *p = malloc(sz);
+    if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
     if (!p) p = calloc(1, sz);
+    if (!p) {
+        void *ptr = NULL;
+        if (posix_memalign(&ptr, 16, (sz + 15) & ~15ul) == 0) p = ptr;
+    }
+    if (!p) {
+        size_t psz = (sz + 16 + 0x3FFF) & ~0x3FFFull;
+        void *m = mmap(NULL, psz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+        if (m != MAP_FAILED) {
+            *(size_t *)m = psz;
+            p = (void *)((uintptr_t)m + 16);
+        }
+    }
     if (!p) {
         tl_log_line("cxx: operator new(%zu) failed out of memory", n);
         abort();
@@ -41,16 +54,50 @@ static void *b_new_nothrow(size_t n, const void *nt)
     (void)nt;
     size_t sz = n ? n : 1;
     void *p = malloc(sz);
+    if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
     if (!p) p = calloc(1, sz);
     return p;
+}
+static void *b_new_aligned(size_t n, size_t align)
+{
+    size_t sz = n ? n : 1;
+    if (align < sizeof(void *)) align = sizeof(void *);
+    void *p = NULL;
+    if (posix_memalign(&p, align, sz) == 0 && p) return p;
+    p = malloc(sz);
+    if (!p) p = malloc_zone_malloc(malloc_default_zone(), sz);
+    if (!p) p = b_new(sz);
+    return p;
+}
+static void *b_new_aligned_nothrow(size_t n, size_t align, const void *nt)
+{
+    (void)nt;
+    return b_new_aligned(n, align);
 }
 static void b_delete(void *p)
 {
     if (!p || (uintptr_t)p < 0x100000ull) return;
-    if (malloc_size(p) == 0) return;
-    free(p);
+    malloc_zone_t *zone = malloc_zone_from_ptr(p);
+    if (zone) {
+        malloc_zone_free(zone, p);
+        return;
+    }
+    if (malloc_size(p) > 0) {
+        free(p);
+        return;
+    }
+    if (((uintptr_t)p & 0xF) == 0) {
+        void *m = (void *)((uintptr_t)p - 16);
+        size_t psz = *(size_t *)m;
+        if (psz >= 0x4000 && (psz & 0x3FFF) == 0 && psz < 0x40000000ull) {
+            munmap(m, psz);
+            return;
+        }
+    }
 }
 static void b_delete_sized(void *p, size_t n) { (void)n; b_delete(p); }
+static void b_delete_aligned(void *p, size_t align) { (void)align; b_delete(p); }
+static void b_delete_sized_aligned(void *p, size_t n, size_t align) { (void)n; (void)align; b_delete(p); }
 
 static void b_cxa_pure_virtual(void)
 {
@@ -187,8 +234,13 @@ const tl_bionic_entry tl_tab_cxx[] = {
     TL_WRAP("__pthread_cleanup_push", b___pthread_cleanup_push), TL_WRAP("__pthread_cleanup_pop", b___pthread_cleanup_pop),
     TL_WRAP("mallinfo", b_mallinfo), TL_WRAP("malloc_usable_size", b_malloc_usable_size),
     TL_WRAP("_Znwm", b_new), TL_WRAP("_Znam", b_new), TL_WRAP("_ZnwmRKSt9nothrow_t", b_new_nothrow), TL_WRAP("_ZnamRKSt9nothrow_t", b_new_nothrow),
+    TL_WRAP("_ZnwmSt11align_val_t", b_new_aligned), TL_WRAP("_ZnamSt11align_val_t", b_new_aligned),
+    TL_WRAP("_ZnwmSt11align_val_tRKSt9nothrow_t", b_new_aligned_nothrow), TL_WRAP("_ZnamSt11align_val_tRKSt9nothrow_t", b_new_aligned_nothrow),
     TL_WRAP("_ZdlPv", b_delete), TL_WRAP("_ZdaPv", b_delete), TL_WRAP("_ZdlPvm", b_delete_sized), TL_WRAP("_ZdaPvm", b_delete_sized),
     TL_WRAP("_ZdlPvRKSt9nothrow_t", b_delete_sized), TL_WRAP("_ZdaPvRKSt9nothrow_t", b_delete_sized),
+    TL_WRAP("_ZdlPvSt11align_val_t", b_delete_aligned), TL_WRAP("_ZdaPvSt11align_val_t", b_delete_aligned),
+    TL_WRAP("_ZdlPvSt11align_val_tRKSt9nothrow_t", b_delete_aligned), TL_WRAP("_ZdaPvSt11align_val_tRKSt9nothrow_t", b_delete_aligned),
+    TL_WRAP("_ZdlPvmSt11align_val_t", b_delete_sized_aligned), TL_WRAP("_ZdaPvmSt11align_val_t", b_delete_sized_aligned),
     TL_WRAP("__cxa_pure_virtual", b_cxa_pure_virtual),
     TL_WRAP("__cxa_guard_acquire", b_cxa_guard_acquire), TL_WRAP("__cxa_guard_release", b_cxa_guard_release), TL_WRAP("__cxa_guard_abort", b_cxa_guard_abort),
     TL_DATA("__stack_chk_guard", &g_stack_chk_guard),

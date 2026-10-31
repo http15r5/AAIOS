@@ -503,8 +503,12 @@ static bool is_cxx_allocator_symbol(const char *name)
 {
     static const char *const names[] = {
         "_Znwm", "_Znam", "_ZnwmRKSt9nothrow_t", "_ZnamRKSt9nothrow_t",
+        "_ZnwmSt11align_val_t", "_ZnamSt11align_val_t",
+        "_ZnwmSt11align_val_tRKSt9nothrow_t", "_ZnamSt11align_val_tRKSt9nothrow_t",
         "_ZdlPv", "_ZdaPv", "_ZdlPvRKSt9nothrow_t", "_ZdaPvRKSt9nothrow_t",
-        "_ZdlPvm", "_ZdaPvm", NULL
+        "_ZdlPvSt11align_val_t", "_ZdaPvSt11align_val_t",
+        "_ZdlPvSt11align_val_tRKSt9nothrow_t", "_ZdaPvSt11align_val_tRKSt9nothrow_t",
+        "_ZdlPvm", "_ZdaPvm", "_ZdlPvmSt11align_val_t", "_ZdaPvmSt11align_val_t", NULL
     };
     for (int i = 0; names[i]; i++) if (!strcmp(name, names[i])) return true;
     return false;
@@ -1051,7 +1055,7 @@ static uint8_t *svc_stub(tl_lib *L, const uint8_t *site_rx)
  * tbz become a test of the loaded value that branches on to the original target,
  * and `br x18` jumps through a scratch register.
  */
-#define X18_STUB_BYTES 64
+#define X18_STUB_BYTES 128
 
 static int64_t g_vx18_off = -1;     /* byte offset of the virtual-x18 slot from the TSD base */
 
@@ -1133,7 +1137,7 @@ static inline uint32_t e_b(const uint8_t *from, const uint8_t *to)
 
 static unsigned pick_scratch(uint32_t used, unsigned avoid)
 {
-    static const unsigned order[] = { 16, 17, 15, 14, 13, 12, 11, 10, 9 };
+    static const unsigned order[] = { 16, 17, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
     for (size_t i = 0; i < sizeof(order) / sizeof(order[0]); i++)
         if (!(used & (1u << order[i])) && order[i] != avoid) return order[i];
     return 0;
@@ -1367,7 +1371,11 @@ static void patch_image(tl_lib *L, size_t *n_tpidr, size_t *n_adrp, size_t *n_ad
                 if (G.verbosity >= 3) tl_log_line("ld: %s: x18 word %08x at +%#llx left alone", L->name, insn, (unsigned long long)(L->code[r].start + (uint64_t)i * 4));
             }
             if (xr == X18_DONE) { L->n_x18++; continue; }
-            if (xr == X18_FAILED) { L->n_x18_failed++; continue; }
+            if (xr == X18_FAILED) {
+                if (G.verbosity >= 1) tl_log_line("ld: %s: x18 rewrite failed at +%#llx for insn %08x", L->name, (unsigned long long)va, insn);
+                L->n_x18_failed++;
+                continue;
+            }
             if ((insn & 0xFFFFFFE0u) == 0xD53B0020u) {            /* mrs Xt, ctr_el0: privileged for user code on Apple silicon */
                 /* The cache type register: the smallest cache lines the program may assume. Code that flushes the
                  * instruction cache (V8) reads it to step by line; 64 bytes is right for Apple's and safe for any. */
@@ -1389,7 +1397,7 @@ static void patch_image(tl_lib *L, size_t *n_tpidr, size_t *n_adrp, size_t *n_ad
                         (*n_adrp)++;
                     }
                 }
-            } else if (insn == 0xD4000001u) {                       /* svc #0 */
+            } else if (!is_data && insn == 0xD4000001u) {                       /* svc #0 */
                 uint8_t *stub = svc_stub(L, pc);
                 int64_t off = stub ? ((int64_t)stub - (int64_t)pc) / 4 : 0;
                 if (stub && off > -(1 << 25) && off < (1 << 25)) {

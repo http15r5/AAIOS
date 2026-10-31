@@ -1391,8 +1391,14 @@ static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, 
     jobj *self = NULL;
     if (!is_static) {
         self = RL(regs, areg[ai++]);
-        if (!self) return dvm_throw("java/lang/NullPointerException", "Attempt to invoke %s method '%s.%s%s' on a null object reference",
+        if (!self) {
+            /* If this is an invalidate/requestLayout call on a null View during view construction, return safely */
+            if (!strcmp(r->name, "invalidate") && !strcmp(r->sig, "()V")) { if (result) result->j = 0; return true; }
+            if (!strcmp(r->name, "requestLayout") && !strcmp(r->sig, "()V")) { if (result) result->j = 0; return true; }
+            if (!strcmp(r->name, "getAlpha") && !strcmp(r->sig, "()I")) { if (result) result->i = 255; return true; }
+            return dvm_throw("java/lang/NullPointerException", "Attempt to invoke %s method '%s.%s%s' on a null object reference",
                                      kind == 4 ? "interface" : "virtual", r->cls->name, r->name, r->sig);
+        }
         /* not an object at all (a bug elsewhere put something else in the register): say where, rather than crash on it */
         if (self->kind > TL_K_OBJ_ARRAY || (self->kind != TL_K_CLASS && self->cls && (((uintptr_t)self->cls & 7) || !name_start_ok((unsigned char)self->cls->name[0])))) {
             tl_log_line("dvm: register v%u of %s.%s holds %p, not an object (kind %u, class %p \"%.40s\"), for %s.%s%s", areg[0], caller->cls->name, caller->name,
@@ -1473,6 +1479,30 @@ static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, 
     }
     if (!target) {
         if (r->hm) { *result = tl_jni_invoke(self, r->hm, kind == 2 || kind == 1, params); return !tl_jni_pending(); }
+        /* Forward deprecated NinePatchDrawable constructors to the 5-arg (Resources, Bitmap, byte[], Rect, String) constructor */
+        if (!strcmp(r->cls->name, "android/graphics/drawable/NinePatchDrawable") && !strcmp(r->name, "<init>")) {
+            dvm_class *dc = dvm_class_of(r->cls);
+            if (dc) {
+                dvm_method *alt = dvm_find_method(dc, "<init>", "(Landroid/content/res/Resources;Landroid/graphics/Bitmap;[BLandroid/graphics/Rect;Ljava/lang/String;)V", false);
+                if (alt) {
+                    jvalue alt_params[5];
+                    alt_params[0].l = NULL;
+                    if (!strcmp(r->sig, "(Landroid/graphics/Bitmap;[BLandroid/graphics/Rect;Ljava/lang/String;)V")) {
+                        alt_params[1] = params[0];
+                        alt_params[2] = params[1];
+                        alt_params[3] = params[2];
+                        alt_params[4] = params[3];
+                        return dvm_call(alt, self, alt_params, result);
+                    } else if (!strcmp(r->sig, "(Landroid/graphics/Bitmap;[BLandroid/graphics/Rect;)V")) {
+                        alt_params[1] = params[0];
+                        alt_params[2] = params[1];
+                        alt_params[3] = params[2];
+                        alt_params[4].l = NULL;
+                        return dvm_call(alt, self, alt_params, result);
+                    }
+                }
+            }
+        }
         tl_log_line("dvm: ADAPTIVE: missing method %s.%s%s - returning dummy zero/null", r->cls->name, r->name, r->sig);
         result->j = 0;
         return true;

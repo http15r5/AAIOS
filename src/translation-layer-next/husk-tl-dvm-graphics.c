@@ -486,7 +486,7 @@ static bool paint_begin(CGContextRef c, const int32_t *p, bool *layered)
     CGContextSetInterpolationQuality(c, (p[P_FLAGS] & PF_FILTER) ? kCGInterpolationDefault : kCGInterpolationNone);
     if (pf(p, P_SHRAD) > 0) {
         CGColorRef sc = color_of((uint32_t)p[P_SHCOL], 1);
-        CGContextSetShadowWithColor(c, CGSizeMake(pf(p, P_SHDX), pf(p, P_SHDY)), pf(p, P_SHRAD), sc);
+        CGContextSetShadowWithColor(c, CGSizeMake(pf(p, P_SHDX), -pf(p, P_SHDY)), pf(p, P_SHRAD), sc);
         CGColorRelease(sc);
     }
     if (p[P_CFMODE] >= 0) {
