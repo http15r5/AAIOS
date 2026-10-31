@@ -662,10 +662,10 @@ public class View implements Drawable.Callback, KeyEvent.Callback {
             applyBackgroundTint();
         }
         requestLayout();
-        invalidate();
+        invalidateHusk();
     }
     public void setBackgroundColor(int c) {
-        if (mBackground instanceof android.graphics.drawable.ColorDrawable) { ((android.graphics.drawable.ColorDrawable) mBackground.mutate()).setColor(c); invalidate(); }
+        if (mBackground instanceof android.graphics.drawable.ColorDrawable) { ((android.graphics.drawable.ColorDrawable) mBackground.mutate()).setColor(c); invalidateHusk(); }
         else setBackground(new android.graphics.drawable.ColorDrawable(c));
     }
     public void setBackgroundResource(int id) { setBackground(id == 0 ? null : mContext.getDrawable(id)); }

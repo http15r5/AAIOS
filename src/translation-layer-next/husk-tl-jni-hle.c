@@ -973,6 +973,7 @@ static const struct { const char *name, *super; } k_classes[] = {
     { "java/util/Scanner", "java/lang/Object" }, { "java/util/HashMap", "java/lang/Object" }, { "java/util/HashSet", "java/lang/Object" },
     { "java/util/Map", "java/lang/Object" }, { "java/util/Set", "java/lang/Object" }, { "java/util/NoSuchElementException", "java/lang/Exception" },
     { "android/hardware/display/DisplayManager", "java/lang/Object" }, { "android/media/AudioManager", "java/lang/Object" },
+    { "dalvik/system/InMemoryDexClassLoader", "java/lang/ClassLoader" },
     { "android/media/AudioDeviceInfo", "java/lang/Object" }, { "android/net/Uri", "java/lang/Object" },
     { "org/fmod/FMODAudioDevice", "java/lang/Object" }, { "android/app/AlertDialog$Builder", "java/lang/Object" }, { "android/app/Dialog", "java/lang/Object" }, { "android/app/AlertDialog", "android/app/Dialog" },
     { "android/content/SharedPreferences$Editor", "java/lang/Object" }, { "java/util/Iterator", "java/lang/Object" },
@@ -1202,6 +1203,7 @@ static const tl_jhle k_hle[] = {
     M("java/lang/reflect/Field", "getDeclaringClass", "()Ljava/lang/Class;", Member_getDeclaringClass),
     M("java/lang/reflect/Method", "getDeclaringClass", "()Ljava/lang/Class;", Member_getDeclaringClass),
     M("java/lang/reflect/Constructor", "getDeclaringClass", "()Ljava/lang/Class;", Member_getDeclaringClass),
+    M("dalvik/system/InMemoryDexClassLoader", "<init>", "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V", Noop),
     { NULL, NULL, NULL, NULL }
 };
 
@@ -1215,7 +1217,13 @@ void tl_hle_configure(const char *pkg, const char *apk, const char *data, int w,
     snprintf(H.ext_files, sizeof(H.ext_files), "%s/sdcard/Android/data/%s/files", data, pkg);
     snprintf(H.ext_cache, sizeof(H.ext_cache), "%s/sdcard/Android/data/%s/cache", data, pkg);
     snprintf(H.native_lib, sizeof(H.native_lib), "/data/app/lib/arm64");
-    H.width = w; H.height = h; H.density = 3.0f;
+    H.width = w; H.height = h;
+    int min_dim = (w > 0 && h > 0) ? (w < h ? w : h) : 0;
+    if (min_dim > 0 && min_dim < 1000) {
+        H.density = (float)min_dim / 392.0f;
+    } else {
+        H.density = 3.0f;
+    }
     H.version_name[0] = 0; H.version_code = 0;
     read_manifest_version(apk);
     read_manifest_meta(apk);

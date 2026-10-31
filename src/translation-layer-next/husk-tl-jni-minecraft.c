@@ -415,6 +415,7 @@ static void Ecc_getY(tl_jcall *c)
 }
 static void Ecdsa_getPublicKey(tl_jcall *c) { c->ret = vl(make("com/microsoft/xal/crypto/EccPubKey")); }
 static void Ecdsa_restoreKeyAndId(tl_jcall *c) { c->ret = vl(make("com/microsoft/xal/crypto/Ecdsa")); }
+static void Ecdsa_getUniqueId(tl_jcall *c) { const char *v = kv_get("xalDeviceId"); if (!v) { char u[40]; new_uuid(u, true); kv_put("xalDeviceId", u); v = kv_get("xalDeviceId"); } c->ret = vl(STR(v)); }
 static void Ecdsa_sign(tl_jcall *c)
 {
     jobj *a = tl_jni_new_prim_array('B', 64);
@@ -568,6 +569,7 @@ static const tl_jhle k_hle[] = {
     M_("com/microsoft/xal/crypto/Ecdsa", "<init>", "()V", Noop),
     M_("com/microsoft/xal/crypto/Ecdsa", "generateKey", "(Ljava/lang/String;)V", Noop),
     M_("com/microsoft/xal/crypto/Ecdsa", "getPublicKey", "()Lcom/microsoft/xal/crypto/EccPubKey;", Ecdsa_getPublicKey),
+    M_("com/microsoft/xal/crypto/Ecdsa", "getUniqueId", "()Ljava/lang/String;", Ecdsa_getUniqueId),
     M_("com/microsoft/xal/crypto/Ecdsa", "storeKeyPairAndId", "(Landroid/content/Context;Ljava/lang/String;)Z", RetTrue),
     M_("com/microsoft/xal/crypto/Ecdsa", "sign", "([B)[B", Ecdsa_sign),
     M_("com/microsoft/xal/crypto/Ecdsa", "sign", "(Ljava/lang/String;)[B", Ecdsa_sign),
@@ -583,6 +585,7 @@ static const tl_jhle k_hle[] = {
     M_("com/microsoft/xboxlive/LocalStorage", "getPath", "(Landroid/content/Context;)Ljava/lang/String;", XAL_storagePath),
     M_("com/microsoft/playfab/utilities/multiplayer/AndroidJniHelperMultiplayer", "createUUID", "()Ljava/lang/String;", Playfab_uuid),
     M_("com/google/androidgamesdk/gametextinput/InputConnection", "setState", "(Lcom/google/androidgamesdk/gametextinput/State;)V", GTI_setState),
+    M_("com/google/androidgamesdk/gametextinput/State", "<init>", "(Ljava/lang/String;IIII)V", Noop),
     M_("java/nio/charset/Charset", "forName", "(Ljava/lang/String;)Ljava/nio/charset/Charset;", CS_forName),
     M_("java/nio/charset/Charset", "decode", "(Ljava/nio/ByteBuffer;)Ljava/nio/CharBuffer;", CS_decode),
     M_("java/nio/CharBuffer", "toString", "()Ljava/lang/String;", CB_toString),

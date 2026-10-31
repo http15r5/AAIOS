@@ -289,7 +289,7 @@ static void *launch_thread(void *arg)
     }
     install_crash_reporter();
     tl_hle_set_ca_bundle(A.ca);
-    if (A.engine != ENGINE_FLUTTER) {
+    if (A.engine == ENGINE_JAVA) {
         extern void husk_release_unused_compressed_heap(void);
         husk_release_unused_compressed_heap();
     }

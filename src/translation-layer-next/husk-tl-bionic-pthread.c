@@ -515,6 +515,10 @@ static void *start_thunk(void *p)
     /* a stack of its own for fault handlers: a crash that leaves the thread's stack unusable is then still reported (macOS kills a
        thread it can not deliver a signal to with SIGILL, and nothing is said) */
     tl_thread_altstack();
+    if (!c.fn || (uintptr_t)c.fn < 0x10000) {
+        tl_log_line("pthread: invalid thread entry %p ignored", c.fn);
+        return NULL;
+    }
     if (g_thread_trace < 0) g_thread_trace = getenv("TL_THREAD_TRACE") ? 1 : 0;
     if (g_thread_trace) {
         const char *ln = NULL; const void *sa = NULL;
@@ -528,6 +532,7 @@ static void *start_thunk(void *p)
 
 static int b_create(pthread_t *out, const guest_attr *attr, void *(*fn)(void *), void *arg)
 {
+    if (!fn || (uintptr_t)fn < 0x10000) return 22;
     pthread_attr_t a;
     pthread_attr_init(&a);
     size_t stack = attr && attr->stack_size ? attr->stack_size : DEFAULT_STACK;
