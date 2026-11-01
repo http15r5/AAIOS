@@ -1008,17 +1008,16 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
     if (!m) { if (ret) ret->j = 0; return true; }
     if (t_depth < 8192) { t_frames[t_depth] = m; t_pcs[t_depth] = 0; }
     t_depth++;
-    /* past 400 frames: StackOverflowError (400 frames * ~1.5 KB frame fits safely on iOS thread stacks) */
+    /* Stack overflow prevention: check depth and physical stack boundary */
     if (!t_stack_low) {
         pthread_t me = pthread_self();
         uintptr_t top = (uintptr_t)pthread_get_stackaddr_np(me);
         size_t sz = pthread_get_stacksize_np(me);
-        size_t reserve = (sz > (1u << 20)) ? (64u << 10) : (32u << 10);
+        size_t reserve = (sz >= (2u << 20)) ? (128u << 10) : (sz >= (1u << 20) ? (64u << 10) : (32u << 10));
         t_stack_low = top - sz + reserve;
     }
     uintptr_t sp = (uintptr_t)__builtin_frame_address(0);
-    /* the error is thrown with 8 KB still above t_stack_low, which its own calls may use; only check sp when depth > 150 to avoid false positives on deep native C++ stacks */
-    if (t_depth > (t_overflowing ? 500 : 450) || (t_depth > 150 && t_stack_low && sp < t_stack_low + (t_overflowing ? 0 : 8192))) {
+    if (t_depth > (t_overflowing ? 600 : 500) || (t_stack_low && sp < t_stack_low + (t_overflowing ? 0 : 16384))) {
         t_depth--;
         if (t_overflowing) return false;
         t_overflowing = true;
@@ -1065,8 +1064,8 @@ static bool dvm_call_inner(dvm_method *m, jobj *self, const jvalue *params, jval
         if (m->flags & 0x100) return call_native(m, self, params, ret);
         return dvm_throw("java/lang/AbstractMethodError", "%s.%s%s", m->cls->name, m->name, m->sig);
     }
-    uint64_t small[64];
-    uint64_t *regs = m->regs <= 64 ? small : calloc(m->regs, sizeof(uint64_t));
+    uint64_t small[16];
+    uint64_t *regs = m->regs <= 16 ? small : calloc(m->regs, sizeof(uint64_t));
     if (regs == small) memset(small, 0, sizeof(uint64_t) * m->regs);
     int r = m->regs - m->ins;
     if (!(m->flags & 8)) regs[r++] = (uint64_t)(uintptr_t)self;
@@ -1415,15 +1414,10 @@ static jobj *new_array(tl_jclass *arrcls, int32_t n)
  * the constructor's result replaces it in every register that held it. */
 bool dvm_string_init(const char *sig, const jvalue *params, jvalue *ret);
 
-static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, const uint16_t *argregs, uint16_t first, bool range,
-                        uint64_t *regs, jvalue *result)
+static bool invoke_regs_inner(dvm_method *caller, int kind, mref *r, int count, const uint16_t *areg,
+                              jvalue *params, uint64_t *regs, jvalue *result)
 {
-    dvm_dex *d = caller->cls->dex;
     bool is_static = kind == 3;
-    mref *r = resolve_mref(d, midx, is_static);
-    if (r->missing) return throw_missing(r->cls);
-    uint16_t areg[256];
-    for (int i = 0; i < count && i < 256; i++) areg[i] = range ? (uint16_t)(first + i) : argregs[i];
     int ai = 0;
     jobj *self = NULL;
     if (!is_static) {
@@ -1444,7 +1438,6 @@ static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, 
             return dvm_throw("java/lang/InternalError", "not an object in v%u for %s.%s", areg[0], r->cls->name, r->name);
         }
     }
-    jvalue params[256];                     /* a call can pass up to 255 registers' worth (Kotlin's default-argument constructors do) */
     for (int i = 0; i < r->nparams && i < 256; i++) {
         char k = r->shorty[1 + i];
         params[i].j = 0;
@@ -1562,6 +1555,27 @@ static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, 
           }
       } }
     return dvm_call(target, self, params, result);
+}
+
+static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, const uint16_t *argregs, uint16_t first, bool range,
+                        uint64_t *regs, jvalue *result)
+{
+    dvm_dex *d = caller->cls->dex;
+    bool is_static = kind == 3;
+    mref *r = resolve_mref(d, midx, is_static);
+    if (r->missing) return throw_missing(r->cls);
+    uint16_t areg_buf[16];
+    uint16_t *areg = count <= 16 ? areg_buf : malloc((size_t)count * sizeof(uint16_t));
+    if (!areg) return dvm_throw("java/lang/OutOfMemoryError", "invoke_regs areg");
+    for (int i = 0; i < count; i++) areg[i] = range ? (uint16_t)(first + i) : argregs[i];
+    jvalue params_buf[16];
+    int np = r->nparams ? r->nparams : 1;
+    jvalue *params = r->nparams <= 16 ? params_buf : malloc((size_t)np * sizeof(jvalue));
+    if (!params) { if (areg != areg_buf) free(areg); return dvm_throw("java/lang/OutOfMemoryError", "invoke_regs params"); }
+    bool ok = invoke_regs_inner(caller, kind, r, count, areg, params, regs, result);
+    if (areg != areg_buf) free(areg);
+    if (params != params_buf) free(params);
+    return ok;
 }
 
 /* A value returned from C is only defined in its own width; the registers want ints zero-extended, sub-ints widened. */

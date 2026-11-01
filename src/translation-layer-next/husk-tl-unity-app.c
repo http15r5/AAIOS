@@ -108,18 +108,51 @@ static void on_fatal(int sig, siginfo_t *info, void *uctx)
 {
     ucontext_t *uc = uctx;
     if (uc && (sig == SIGSEGV || sig == SIGBUS) && (uintptr_t)info->si_addr < 0x1000) {
-        bool is_deadcode = false;
+        bool is_assert_trap = false;
         for (int r = 0; r < 29; r++) {
-            if ((uint32_t)uc->uc_mcontext->__ss.__x[r] == 0xdeadc0de) {
-                is_deadcode = true;
+            uint64_t v = uc->uc_mcontext->__ss.__x[r];
+            if ((uint32_t)v == 0xdeadc0de || v == 0xdeadbeefcafebabeull || (uint32_t)v == 0xdeadbeefu || (uint32_t)v == 0xcafebabeu) {
+                is_assert_trap = true;
                 break;
             }
         }
-        if (is_deadcode) {
-            tl_log_line("ld: caught Bedrock intentional assert trap (0xdeadc0de) at pc %p, advancing pc by 4",
-                        (void *)uc->uc_mcontext->__ss.__pc);
-            uc->uc_mcontext->__ss.__pc += 4;
+        char tn_probe[40] = "";
+        pthread_getname_np(pthread_self(), tn_probe, sizeof(tn_probe));
+        if (is_assert_trap || !strncmp(tn_probe, "Streaming Pool", 14)) {
+            tl_log_line("ld: caught Bedrock intentional assert trap / stream fault at pc %p, advancing pc by 4 or returning to lr %p",
+                        (void *)uc->uc_mcontext->__ss.__pc, (void *)uc->uc_mcontext->__ss.__lr);
+            if (uc->uc_mcontext->__ss.__lr && (uintptr_t)uc->uc_mcontext->__ss.__lr > 0x100000ull) {
+                uc->uc_mcontext->__ss.__pc = uc->uc_mcontext->__ss.__lr;
+            } else {
+                uc->uc_mcontext->__ss.__pc += 4;
+            }
             return;
+        }
+    }
+    if (uc && (sig == SIGSEGV || sig == SIGBUS) && ((uintptr_t)info->si_addr & 0xffff000000000000ull)) {
+        static _Thread_local uintptr_t s_last_pac_pc;
+        static _Thread_local int s_pac_recurs;
+        uintptr_t cur_pc = (uintptr_t)uc->uc_mcontext->__ss.__pc;
+        if (cur_pc == s_last_pac_pc) s_pac_recurs++;
+        else { s_last_pac_pc = cur_pc; s_pac_recurs = 1; }
+        if (s_pac_recurs <= 3) {
+            bool recovered = false;
+            uintptr_t target_mask = (uintptr_t)info->si_addr & 0x00007fffffffffffull;
+            for (int r = 0; r < 29; r++) {
+                uint64_t v = uc->uc_mcontext->__ss.__x[r];
+                if ((v & 0xffff000000000000ull) && ((v & 0x00007fffffffffffull) == target_mask || labs((long)((v & 0x00007fffffffffffull) - target_mask)) < 4096)) {
+                    uc->uc_mcontext->__ss.__x[r] = (v & 0x00007fffffffffffull);
+                    recovered = true;
+                }
+            }
+            if (cur_pc & 0xffff000000000000ull) {
+                uc->uc_mcontext->__ss.__pc = cur_pc & 0x00007fffffffffffull;
+                recovered = true;
+            }
+            if (recovered) {
+                tl_log_line("ld: recovered from PAC / signed pointer fault at %p (pc %p)", info->si_addr, (void *)cur_pc);
+                return;
+            }
         }
     }
     char tn[40] = "", a[200], b[200], c[200];
@@ -142,6 +175,7 @@ static void on_fatal(int sig, siginfo_t *info, void *uctx)
     for (int i = 0; i < 29; i += 4)
         tl_log_line("    x%d=%#llx x%d=%#llx x%d=%#llx x%d=%#llx", i, uc->uc_mcontext->__ss.__x[i], i + 1, uc->uc_mcontext->__ss.__x[i + 1],
                     i + 2, i + 2 < 29 ? uc->uc_mcontext->__ss.__x[i + 2] : 0ull, i + 3, i + 3 < 29 ? uc->uc_mcontext->__ss.__x[i + 3] : 0ull);
+    tl_dvm_print_stack(stderr, 25);
     if (g_prev[sig].sa_flags & SA_SIGINFO) {
         if (g_prev[sig].sa_sigaction) { g_prev[sig].sa_sigaction(sig, info, uctx); return; }
     } else if (g_prev[sig].sa_handler != SIG_DFL && g_prev[sig].sa_handler != SIG_IGN && g_prev[sig].sa_handler) {

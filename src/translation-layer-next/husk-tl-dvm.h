@@ -17,6 +17,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "husk-tl-jni.h"
 
@@ -45,6 +46,9 @@ const uint16_t *tl_dvm_string_chars(jobj *s, int32_t *n);
 
 /* The exception pending on this thread as text ("java.lang.Foo: message"), for logs; NULL when there is none. */
 const char *tl_dvm_describe_pending(char *buf, size_t n);
+
+/* The calling thread's Java frames, innermost first, for a crash report. */
+void tl_dvm_print_stack(FILE *f, int max);
 
 void tl_dvm_set_trace(int level);       /* 1: classes and natives; 2: every invoke */
 

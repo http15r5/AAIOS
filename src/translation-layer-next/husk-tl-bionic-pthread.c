@@ -538,7 +538,7 @@ static int b_create(pthread_t *out, const guest_attr *attr, void *(*fn)(void *),
     pthread_attr_t a;
     pthread_attr_init(&a);
     size_t stack = attr && attr->stack_size ? attr->stack_size : DEFAULT_STACK;
-    if (stack < (1024u * 1024u)) stack = 1024u * 1024u;
+    if (stack < (2048u * 1024u)) stack = 2048u * 1024u;
     if (stack > (8u << 20)) stack = 8u << 20;
     stack = (stack + 16383) & ~(size_t)16383;
     pthread_attr_setstacksize(&a, stack);

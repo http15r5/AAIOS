@@ -25,7 +25,9 @@ static NSURLSession *shared_session(void)
         NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
         cfg.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
         cfg.URLCache = nil;
-        session = [NSURLSession sessionWithConfiguration:cfg delegate:[TLHttpNoRedirect new] delegateQueue:nil];
+        NSOperationQueue *q = [[NSOperationQueue alloc] init];
+        q.maxConcurrentOperationCount = 8;
+        session = [NSURLSession sessionWithConfiguration:cfg delegate:[TLHttpNoRedirect new] delegateQueue:q];
     });
     return session;
 }
@@ -52,10 +54,10 @@ static bool perform_once(const tl_http_request *req, tl_http_response *out)
         }
         if (req->body_len > 0) r.HTTPBody = [NSData dataWithBytes:req->body length:req->body_len];
 
-        __block NSData *data; __block NSURLResponse *resp; __block NSError *err;
+        __block NSData *data = nil; __block NSURLResponse *resp = nil; __block NSError *err = nil;
         dispatch_semaphore_t done = dispatch_semaphore_create(0);
         NSURLSessionDataTask *task = [shared_session() dataTaskWithRequest:r completionHandler:^(NSData *d, NSURLResponse *rs, NSError *e) {
-            data = d; resp = rs; err = e;
+            data = d ? [d copy] : nil; resp = rs; err = e;
             dispatch_semaphore_signal(done);
         }];
         [task resume];
