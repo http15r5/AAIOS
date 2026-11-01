@@ -404,9 +404,9 @@ static void XWS_connect(tl_jcall *c)
     const char *url = S(c->args[0].l);
     const char *sub = S(c->args[1].l);
     tl_log_line("http: HttpClientWebSocket connect to '%s' (subprotocol '%s')", url, sub);
-    typedef void (*fail_fn)(void *env, void *self, int err);
-    fail_fn fail = x_native(XWS, "onFailure", "(I)V", "Java_com_xbox_httpclient_HttpClientWebSocket_onFailure");
-    if (fail) fail(tl_jni_env(), c->self, 0);
+    /* Asynchronous websocket connect in Android libHttpClient:
+     * Never call onFailure synchronously inside connect()! Re-entrant failure during connect()
+     * aborts libHttpClient before HCWebSocketConnectAsync finishes state setup. */
 }
 
 static const tl_jhle k_xbox[] = {

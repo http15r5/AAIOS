@@ -50,9 +50,9 @@ jobj *tl_jni_ref(jobj *o) { if (o) __atomic_add_fetch(&o->refs, 1, __ATOMIC_RELA
 void tl_jni_unref(jobj *o)
 {
     if (!o || o->kind == TL_K_CLASS) return;
-    /* With the Java runtime up, objects live as long as Java can reach them, which reference counts from native code do not
-     * know about: nothing is freed here (a tracing collector's job). */
-    if (tl_dvm) return;
+    /* DVM-managed objects have refs >= (1 << 29) (pinned at 1 << 30) so they are kept alive.
+     * Temporary JNI/HLE objects (refs < 1 << 29) are ref-counted and freed on DeleteLocalRef/unref. */
+    if (tl_dvm && o->refs >= (1u << 29)) return;
     if (__atomic_sub_fetch(&o->refs, 1, __ATOMIC_ACQ_REL) != 0) return;
     switch (o->kind) {
     case TL_K_STRING: free(o->str.utf8); free(o->str.u16); break;

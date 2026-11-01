@@ -31,6 +31,11 @@
 void tl_nwindow_configure(int w, int h, void *layer);
 void *tl_nwindow_get(void);
 
+#if TARGET_OS_IPHONE
+extern void *objc_autoreleasePoolPush(void);
+extern void objc_autoreleasePoolPop(void *);
+#endif
+
 static struct {
     tl_javaapp_config cfg;
     char apk[1024], data[512], ext[512], pkg[200], activity[260], application[260], frame_dir[512], angle_egl[600], angle_gles[600];
@@ -1007,6 +1012,9 @@ static void *gl_main(void *arg)
     int64_t next = now_ns();
     while (!atomic_load(&A.ended)) {
         if (atomic_load(&A.paused)) { usleep(20000); next = now_ns(); continue; }
+#if TARGET_OS_IPHONE
+        void *pool = objc_autoreleasePoolPush();
+#endif
         bool drew = false;
         /* the app's renderer, once its GLSurfaceView is on screen */
         if (__atomic_load_n(&A.gl_renderer, __ATOMIC_ACQUIRE) && !app) {
@@ -1077,6 +1085,9 @@ static void *gl_main(void *arg)
             swapBuffers(dpy, surf);
             atomic_fetch_add(&A.frames, 1);
         }
+#if TARGET_OS_IPHONE
+        objc_autoreleasePoolPop(pool);
+#endif
         next += 1000000000ll / 60;
         int64_t late = now_ns() - next;
         if (late > 100000000ll) next = now_ns();
