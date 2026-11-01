@@ -1001,11 +1001,7 @@ static jobj *new_hash_map(void)
 {
     tl_jclass *cls = tl_jni_class("java/util/HashMap");
     jobj *map = tl_jni_new_object(cls);
-    if (!map) return NULL;
-    if (tl_dvm) {
-        tl_jmeth *init = tl_jni_method(cls, "<init>", "()V", false);
-        if (init) tl_jni_invoke(map, init, true, NULL);
-    }
+    if (map) tl_jni_call(map, "<init>", "()V", NULL);
     return map;
 }
 
@@ -1013,11 +1009,7 @@ static jobj *new_hash_set(void)
 {
     tl_jclass *cls = tl_jni_class("java/util/HashSet");
     jobj *set = tl_jni_new_object(cls);
-    if (!set) return NULL;
-    if (tl_dvm) {
-        tl_jmeth *init = tl_jni_method(cls, "<init>", "()V", false);
-        if (init) tl_jni_invoke(set, init, true, NULL);
-    }
+    if (set) tl_jni_call(set, "<init>", "()V", NULL);
     return set;
 }
 
@@ -1025,11 +1017,7 @@ static jobj *new_array_list(void)
 {
     tl_jclass *cls = tl_jni_class("java/util/ArrayList");
     jobj *list = tl_jni_new_object(cls);
-    if (!list) return NULL;
-    if (tl_dvm) {
-        tl_jmeth *init = tl_jni_method(cls, "<init>", "()V", false);
-        if (init) tl_jni_invoke(list, init, true, NULL);
-    }
+    if (list) tl_jni_call(list, "<init>", "()V", NULL);
     return list;
 }
 
