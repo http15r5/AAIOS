@@ -351,21 +351,46 @@ static int b_epoll_create(int size) { if (size <= 0) { tl_set_guest_errno(22); r
 
 static int b_epoll_ctl(int epfd, int op, int fd, const guest_epoll_event *ev)
 {
-    struct kevent k[2];
-    int n = 0;
-    if (op == 2 || op == 3) {               /* DEL, or MOD: remove both filters first (one may not be there) */
+    if (op == 2) {               /* DEL: remove both filters */
+        struct kevent k[2];
         EV_SET(&k[0], fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
         EV_SET(&k[1], fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
-        for (int i = 0; i < 2; i++) kevent(epfd, &k[i], 1, NULL, 0, NULL);
-        if (op == 2) return 0;
+        kevent(epfd, &k[0], 1, NULL, 0, NULL);
+        kevent(epfd, &k[1], 1, NULL, 0, NULL);
+        return 0;
     }
     if (!ev) { tl_set_guest_errno(14 /* EFAULT */); return -1; }
     uint16_t flags = EV_ADD | EV_ENABLE | ((ev->events & EPOLLET) ? EV_CLEAR : 0) | ((ev->events & EPOLLONESHOT) ? EV_ONESHOT : 0);
     void *udata = (void *)(uintptr_t)ev->data;
-    if (ev->events & (EPOLLIN | EPOLLPRI | EPOLLRDHUP)) EV_SET(&k[n++], fd, EVFILT_READ, flags, 0, 0, udata);
-    if (ev->events & EPOLLOUT) EV_SET(&k[n++], fd, EVFILT_WRITE, flags, 0, 0, udata);
-    if (!n) EV_SET(&k[n++], fd, EVFILT_READ, flags | EV_DISABLE, 0, 0, udata);    /* hang-ups and errors only */
-    TL_ERRNO_BEGIN(); int r = kevent(epfd, k, n, NULL, 0, NULL); TL_ERRNO_END();
+
+    struct kevent k[4];
+    int n = 0;
+
+    if (ev->events & (EPOLLIN | EPOLLPRI | EPOLLRDHUP)) {
+        EV_SET(&k[n++], fd, EVFILT_READ, flags, 0, 0, udata);
+    } else if (op == 3) {
+        /* MOD: no longer interested in read: delete read filter */
+        struct kevent kd;
+        EV_SET(&kd, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+        kevent(epfd, &kd, 1, NULL, 0, NULL);
+    }
+
+    if (ev->events & EPOLLOUT) {
+        EV_SET(&k[n++], fd, EVFILT_WRITE, flags, 0, 0, udata);
+    } else if (op == 3) {
+        /* MOD: no longer interested in write: delete write filter */
+        struct kevent kd;
+        EV_SET(&kd, fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+        kevent(epfd, &kd, 1, NULL, 0, NULL);
+    }
+
+    if (!n) {
+        EV_SET(&k[n++], fd, EVFILT_READ, flags | EV_DISABLE, 0, 0, udata);
+    }
+
+    TL_ERRNO_BEGIN();
+    int r = kevent(epfd, k, n, NULL, 0, NULL);
+    TL_ERRNO_END();
     return r < 0 ? -1 : 0;
 }
 

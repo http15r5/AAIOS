@@ -619,10 +619,11 @@ static void clip_path(CGContextRef c, const void *ctx)
     if (pc->style == 1) { CGContextReplacePathWithStrokedPath(c); CGContextClip(c); }
     else if (pc->even_odd) CGContextEOClip(c); else CGContextClip(c);
 }
-struct text_clip { CTLineRef line; CGFloat x, y; };
+struct text_clip { CTLineRef line; CGFloat x, y; CGAffineTransform m; };
 static void clip_text(CGContextRef c, const void *ctx)
 {
     const struct text_clip *tc = ctx;
+    CGContextSetTextMatrix(c, tc->m);
     CGContextSetTextDrawingMode(c, kCGTextClip);
     CGContextSetTextPosition(c, tc->x, tc->y);
     CTLineDraw(tc->line, c);
@@ -771,6 +772,72 @@ static CFStringRef cfstr(jobj *s, int start, int end)
     return str ? str : CFStringCreateWithCharacters(NULL, empty, 0);
 }
 
+static CFAttributedStringRef make_attributed_string(CFStringRef safe_str, const int32_t *p, gface *g)
+{
+    if (!safe_str) return NULL;
+    CFIndex len = CFStringGetLength(safe_str);
+    if (len <= 0) return CFAttributedStringCreate(NULL, CFSTR(""), NULL);
+
+    CTFontRef f = sized(g, pf(p, P_TEXTSIZE));
+    float ls = pf(p, P_LSPACE) * pf(p, P_TEXTSIZE);
+    CFNumberRef kern = (ls != 0.0f) ? CFNumberCreate(NULL, kCFNumberFloatType, &ls) : NULL;
+    CGColorRef col = color_of((uint32_t)p[P_COLOR], 1);
+
+    UniChar stack_chars[256];
+    CGGlyph stack_glyphs[256];
+    UniChar *chars = (len <= 256) ? stack_chars : malloc(sizeof(UniChar) * (size_t)len);
+    CGGlyph *glyphs = (len <= 256) ? stack_glyphs : malloc(sizeof(CGGlyph) * (size_t)len);
+
+    CFStringGetCharacters(safe_str, CFRangeMake(0, len), chars);
+    bool all_covered = f ? CTFontGetGlyphsForCharacters(f, chars, glyphs, len) : false;
+
+    CFMutableAttributedStringRef mas = CFAttributedStringCreateMutable(NULL, len);
+    CFAttributedStringReplaceString(mas, CFRangeMake(0, 0), safe_str);
+
+    CFRange allRange = CFRangeMake(0, len);
+    if (f) CFAttributedStringSetAttribute(mas, allRange, kCTFontAttributeName, f);
+    if (col) CFAttributedStringSetAttribute(mas, allRange, kCTForegroundColorAttributeName, col);
+    if (kern) CFAttributedStringSetAttribute(mas, allRange, kCTKernAttributeName, kern);
+
+    if (!all_covered && f) {
+        for (CFIndex i = 0; i < len; ) {
+            CFIndex char_len = (i + 1 < len && chars[i] >= 0xD800 && chars[i] <= 0xDBFF && chars[i + 1] >= 0xDC00 && chars[i + 1] <= 0xDFFF) ? 2 : 1;
+            if (chars[i] <= 0x20 || glyphs[i] != 0) {
+                i += char_len;
+                continue;
+            }
+            CTFontRef fallback = CTFontCreateForString(f, safe_str, CFRangeMake(i, len - i));
+            if (!fallback) {
+                i += char_len;
+                continue;
+            }
+            CFIndex k = i;
+            while (k < len) {
+                CFIndex next_len = (k + 1 < len && chars[k] >= 0xD800 && chars[k] <= 0xDBFF && chars[k + 1] >= 0xDC00 && chars[k + 1] <= 0xDFFF) ? 2 : 1;
+                CGGlyph fg[2] = {0, 0};
+                CTFontGetGlyphsForCharacters(fallback, &chars[k], fg, next_len);
+                if (fg[0] != 0) {
+                    k += next_len;
+                } else {
+                    if (k == i) k += next_len;
+                    break;
+                }
+            }
+            CFAttributedStringSetAttribute(mas, CFRangeMake(i, k - i), kCTFontAttributeName, fallback);
+            CFRelease(fallback);
+            i = k;
+        }
+    }
+
+    if (chars != stack_chars) free(chars);
+    if (glyphs != stack_glyphs) free(glyphs);
+    if (col) CFRelease(col);
+    if (kern) CFRelease(kern);
+    if (f) CFRelease(f);
+
+    return mas;
+}
+
 static CTLineRef make_line(CFStringRef str, const int32_t *p, gface *g)
 {
     static const UniChar empty[] = { ' ' };
@@ -780,24 +847,9 @@ static CTLineRef make_line(CFStringRef str, const int32_t *p, gface *g)
         safe_str = CFStringCreateWithCharacters(NULL, empty, 0);
         own_str = true;
     }
-    CTFontRef f = sized(g, pf(p, P_TEXTSIZE));
-    float ls = pf(p, P_LSPACE) * pf(p, P_TEXTSIZE);
-    CFNumberRef kern = (ls != 0.0f) ? CFNumberCreate(NULL, kCFNumberFloatType, &ls) : NULL;
-    CGColorRef col = color_of((uint32_t)p[P_COLOR], 1);
-    const void *k[3];
-    const void *v[3];
-    CFIndex nattrs = 0;
-    k[nattrs] = kCTFontAttributeName; v[nattrs] = f; nattrs++;
-    if (col) { k[nattrs] = kCTForegroundColorAttributeName; v[nattrs] = col; nattrs++; }
-    if (kern) { k[nattrs] = kCTKernAttributeName; v[nattrs] = kern; nattrs++; }
-    CFDictionaryRef attrs = CFDictionaryCreate(NULL, k, v, nattrs, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    CFAttributedStringRef as = safe_str ? CFAttributedStringCreate(NULL, safe_str, attrs) : NULL;
+    CFAttributedStringRef as = make_attributed_string(safe_str, p, g);
     CTLineRef line = as ? CTLineCreateWithAttributedString(as) : NULL;
     if (as) CFRelease(as);
-    if (attrs) CFRelease(attrs);
-    if (col) CFRelease(col);
-    if (kern) CFRelease(kern);
-    if (f) CFRelease(f);
     if (own_str && safe_str) CFRelease(safe_str);
     if (!line) {
         CFAttributedStringRef fallback_as = CFAttributedStringCreate(NULL, CFSTR(" "), NULL);
@@ -826,7 +878,8 @@ static void draw_text(gcanvas *v, jobj *s, int start, int end, float x, float y,
     bool layered;
     if (paint_begin(c, p, &layered)) {
         float sx = pf(p, P_SCALEX) > 0 ? pf(p, P_SCALEX) : 1, skew = pf(p, P_SKEWX);
-        CGContextSetTextMatrix(c, CGAffineTransformMake(sx, 0, -skew, -1, 0, 0));
+        CGAffineTransform tm = CGAffineTransformMake(sx, 0, -skew, -1, 0, 0);
+        CGContextSetTextMatrix(c, tm);
         int style = p[P_STYLE];
         bool bold = (p[P_FLAGS] & PF_FAKEBOLD) != 0;
         if (bold || style != 0) {
@@ -852,7 +905,7 @@ static void draw_text(gcanvas *v, jobj *s, int start, int end, float x, float y,
             if (p[P_FLAGS] & PF_UNDERLINE) CGContextFillRect(c, CGRectMake(x, y + ts / 9, w, th));
             if (p[P_FLAGS] & PF_STRIKE) CGContextFillRect(c, CGRectMake(x, y - ts * 0.3f, w, th));
         }
-        struct text_clip tcl = { line, x, y };
+        struct text_clip tcl = { line, x, y, tm };
         paint_end_clip(c, p, layered, area, clip_text, &tcl);
     }
     CFRelease(line);
@@ -1042,7 +1095,7 @@ NAT(G_cvSaveLayer)
 {
     (void)self;
     gcanvas *v = H(gcanvas, 0);
-    CGRect r = CGRectMake(a[1].f, a[2].f, a[3].f - a[1].f, a[4].f - a[2].f);
+    CGRect r = CGRectStandardize(CGRectMake(fminf(a[1].f, a[3].f), fminf(a[2].f, a[4].f), fabsf(a[3].f - a[1].f), fabsf(a[4].f - a[2].f)));
     *ret = Ii(v ? cv_save(v, true, a[5].i / 255.0f, r) : 1);
     return true;
 }
@@ -1087,7 +1140,7 @@ NAT(G_cvClipRect)
     gcanvas *v = H(gcanvas, 0);
     *ret = Ii(1);
     if (!v) return true;
-    CGRect r = CGRectMake(a[1].f, a[2].f, a[3].f - a[1].f, a[4].f - a[2].f);
+    CGRect r = CGRectStandardize(CGRectMake(fminf(a[1].f, a[3].f), fminf(a[2].f, a[4].f), fabsf(a[3].f - a[1].f), fabsf(a[4].f - a[2].f)));
     if (a[5].i == 0) {
         CGRect all = CGContextGetClipBoundingBox(v->c);
         CGContextAddRect(v->c, CGRectInset(all, -1, -1));
@@ -1377,10 +1430,7 @@ NAT(G_txBreak)
     (void)self;
     CFStringRef s = cfstr(a[0].l, a[1].i, a[2].i);
     const int32_t *p = paint_of(a[4].l);
-    CTFontRef f = sized((gface *)(uintptr_t)a[5].j, pf(p, P_TEXTSIZE));
-    const void *k[] = { kCTFontAttributeName }; const void *v[] = { f };
-    CFDictionaryRef attrs = CFDictionaryCreate(NULL, k, v, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    CFAttributedStringRef as = s ? CFAttributedStringCreate(NULL, s, attrs) : NULL;
+    CFAttributedStringRef as = make_attributed_string(s, p, (gface *)(uintptr_t)a[5].j);
     CTTypesetterRef ts = as ? CTTypesetterCreateWithAttributedString(as) : NULL;
     float sx = pf(p, P_SCALEX) > 0 ? pf(p, P_SCALEX) : 1;
     double w = a[3].f / sx;
@@ -1391,9 +1441,7 @@ NAT(G_txBreak)
     }
     *ret = Ii((int32_t)n);
     if (as) CFRelease(as);
-    if (attrs) CFRelease(attrs);
     if (s) CFRelease(s);
-    if (f) CFRelease(f);
     return true;
 }
 /* (String, int start, int end, int[] paint, long typeface, float[] out) -> advances per UTF-16 unit */
@@ -1441,7 +1489,10 @@ NAT(G_tfFromData)
     *ret = J(0);
     if (!d || !n) return true;
 
-    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, d, n, NULL);
+    CFDataRef cfdata = CFDataCreate(NULL, d, n);
+    if (!cfdata) return true;
+
+    CGDataProviderRef provider = CGDataProviderCreateWithCFData(cfdata);
     CGFontRef cgFont = provider ? CGFontCreateWithDataProvider(provider) : NULL;
     if (provider) CGDataProviderRelease(provider);
 
@@ -1452,14 +1503,13 @@ NAT(G_tfFromData)
         CGFontRelease(cgFont);
     }
     if (!baseFont) {
-        CFDataRef data = CFDataCreate(NULL, d, n);
-        CTFontDescriptorRef desc = data ? CTFontManagerCreateFontDescriptorFromData(data) : NULL;
-        if (data) CFRelease(data);
+        CTFontDescriptorRef desc = CTFontManagerCreateFontDescriptorFromData(cfdata);
         if (desc) {
             baseFont = CTFontCreateWithFontDescriptor(desc, 12, NULL);
             CFRelease(desc);
         }
     }
+    CFRelease(cfdata);
     if (!baseFont) return true;
     CTFontRef f = font_with_cascade(baseFont);
     gface *g = calloc(1, sizeof(*g));

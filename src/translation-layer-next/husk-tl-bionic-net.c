@@ -382,7 +382,23 @@ static int b_setsockopt(int fd, int level, int name, const void *val, socklen_t 
 static int b_getsockopt(int fd, int level, int name, void *val, socklen_t *len)
 {
     int dl, dn;
-    if (!opt_to_darwin(level, name, &dl, &dn)) { tl_set_guest_errno(G_ENOPROTOOPT); return -1; }
+    if (!opt_to_darwin(level, name, &dl, &dn)) {
+        if (level == G_SOL_SOCKET && name == 38 /* SO_PROTOCOL */ && val && len && *len >= sizeof(int)) {
+            *(int *)val = 6; /* IPPROTO_TCP */
+            *len = sizeof(int);
+            return 0;
+        }
+        if (level == G_SOL_SOCKET && name == 39 /* SO_DOMAIN */ && val && len && *len >= sizeof(int)) {
+            *(int *)val = 2; /* AF_INET */
+            *len = sizeof(int);
+            return 0;
+        }
+        if (level == 6 /* IPPROTO_TCP */ && name == 11 /* TCP_INFO */ && val && len) {
+            memset(val, 0, *len);
+            return 0;
+        }
+        tl_set_guest_errno(G_ENOPROTOOPT); return -1;
+    }
     TL_ERRNO_BEGIN();
     int r = getsockopt(fd, dl, dn, val, len);
     int e = errno;

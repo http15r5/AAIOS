@@ -125,9 +125,17 @@ bool tl_zip_open(tl_zip *z, const char *path, char *err, size_t errlen)
         return false;
     }
     z->size = (size_t)st.st_size;
+    __attribute__((weak)) void husk_release_unused_compressed_heap(void);
     void *map = mmap(NULL, z->size, PROT_READ, MAP_SHARED, z->fd, 0);
     if (map == MAP_FAILED) {
         map = mmap(NULL, z->size, PROT_READ, MAP_PRIVATE, z->fd, 0);
+    }
+    if (map == MAP_FAILED && errno == ENOMEM && husk_release_unused_compressed_heap) {
+        husk_release_unused_compressed_heap();
+        map = mmap(NULL, z->size, PROT_READ, MAP_SHARED, z->fd, 0);
+        if (map == MAP_FAILED) {
+            map = mmap(NULL, z->size, PROT_READ, MAP_PRIVATE, z->fd, 0);
+        }
     }
     if (map == MAP_FAILED) {
         fail(err, errlen, "cannot map: %s", strerror(errno));

@@ -758,11 +758,12 @@ static int b_flock(int fd, int op) { TL_ERRNO_BEGIN(); int r = flock(fd, op); TL
 static int b_fallocate(int fd, int mode, off_t off, off_t len)
 {
     if (fd < 0 || off < 0 || len < 0) { tl_set_guest_errno(22); return -1; }
-    if (mode != 0) { tl_set_guest_errno(95); return -1; }
     struct stat st;
     if (fstat(fd, &st) < 0) { tl_set_guest_errno(errno); return -1; }
     if (off + len > st.st_size) {
-        if (ftruncate(fd, off + len) < 0) { tl_set_guest_errno(errno); return -1; }
+        if (!(mode & 1 /* FALLOC_FL_KEEP_SIZE */)) {
+            if (ftruncate(fd, off + len) < 0) { tl_set_guest_errno(errno); return -1; }
+        }
     }
     return 0;
 }
@@ -1608,6 +1609,7 @@ static void *b_mremap(void *old, size_t olds, size_t news, int flags, void *newa
     if (n == MAP_FAILED) { tl_set_guest_errno(12); return (void *)-1; }
     anon_add(n, news);
     memcpy(n, old, olds < news ? olds : news);
+    anon_remove((uintptr_t)old, olds);
     munmap(old, olds);
     return n;
 }
