@@ -382,16 +382,44 @@ static int b_epoll_wait(int epfd, guest_epoll_event *out, int max, int timeout_m
         if (r >= 0 || errno != EINTR) break;
     }
     if (r < 0) { tl_set_guest_errno(tl_errno_to_guest(errno)); return -1; }
+
+    uintptr_t seen_idents[64];
+    int out_cnt = 0;
     for (int i = 0; i < r; i++) {
         uint32_t e = 0;
         if (k[i].filter == EVFILT_READ) e |= EPOLLIN;
         if (k[i].filter == EVFILT_WRITE) e |= EPOLLOUT;
-        if (k[i].flags & EV_EOF) e |= EPOLLHUP | EPOLLRDHUP;
+        if (k[i].flags & EV_EOF) {
+            if (k[i].filter == EVFILT_READ) {
+                e |= EPOLLIN | EPOLLRDHUP;
+                if (k[i].fflags != 0) e |= EPOLLERR;
+            } else {
+                e |= EPOLLHUP;
+                if (k[i].fflags != 0) e |= EPOLLERR;
+            }
+        }
         if (k[i].flags & EV_ERROR) e |= EPOLLERR;
-        out[i].events = e;
-        out[i].data = (uint64_t)(uintptr_t)k[i].udata;
+
+        uint64_t data = (uint64_t)(uintptr_t)k[i].udata;
+        uintptr_t ident = k[i].ident;
+
+        int found = -1;
+        for (int j = 0; j < out_cnt; j++) {
+            if (seen_idents[j] == ident) {
+                found = j;
+                break;
+            }
+        }
+        if (found >= 0) {
+            out[found].events |= e;
+        } else if (out_cnt < max) {
+            seen_idents[out_cnt] = ident;
+            out[out_cnt].events = e;
+            out[out_cnt].data = data;
+            out_cnt++;
+        }
     }
-    return r;
+    return out_cnt;
 }
 static int b_epoll_pwait(int epfd, guest_epoll_event *out, int max, int timeout_ms, const void *mask) { (void)mask; return b_epoll_wait(epfd, out, max, timeout_ms); }
 
@@ -457,7 +485,7 @@ const tl_bionic_entry tl_tab_sys[] = {
     TL_WRAP("setsid", b_setsid), TL_WRAP("wait", b_wait), TL_WRAP("execvp", b_execvp), TL_WRAP("posix_madvise", b_posix_madvise),
     TL_WRAP("inotify_init1", b_inotify_init1), TL_WRAP("inotify_rm_watch", b_inotify_rm_watch),
     TL_WRAP("epoll_create", b_epoll_create), TL_WRAP("epoll_create1", b_epoll_create1), TL_WRAP("epoll_ctl", b_epoll_ctl),
-    TL_WRAP("epoll_wait", b_epoll_wait), TL_WRAP("epoll_pwait", b_epoll_pwait), TL_WRAP("eventfd", b_eventfd),
+    TL_WRAP("epoll_wait", b_epoll_wait), TL_WRAP("epoll_pwait", b_epoll_pwait), TL_WRAP("eventfd", b_eventfd), TL_WRAP("eventfd2", b_eventfd),
     TL_WRAP("timerfd_create", b_timerfd_create), TL_WRAP("timerfd_settime", b_timerfd_settime), TL_WRAP("timerfd_gettime", b_timerfd_gettime),
     TL_WRAP("chown", b_chown), TL_WRAP("lchown", b_chown), TL_WRAP("fchownat", b_fchownat), TL_WRAP("chroot", b_eperm),
     TL_WRAP("linkat", b_eperm), TL_WRAP("setgroups", b_eperm), TL_WRAP("seteuid", b_eperm), TL_WRAP("setegid", b_eperm),

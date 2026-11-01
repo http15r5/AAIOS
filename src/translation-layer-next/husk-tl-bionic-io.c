@@ -693,7 +693,11 @@ static void *b_getmntent_r(void *f, void *ent, char *buf, int n) { (void)f; (voi
 static int b_endmntent(void *f) { (void)f; return 1; }
 /* write() with the buffer's size checked first, as bionic's FORTIFY does */
 static long b___write_chk(int fd, const void *p, size_t n, size_t bufsize) { if (n > bufsize) abort(); return b_write(fd, p, n); }
-static long b_writev(int fd, const struct iovec *v, int n) { TL_ERRNO_BEGIN(); long r = writev(fd, v, n); TL_ERRNO_END(); return r; }
+static long b_writev(int fd, const struct iovec *v, int n)
+{
+    if (evfd_peer(fd) >= 0) fd = evfd_peer(fd);
+    TL_ERRNO_BEGIN(); long r = writev(fd, v, n); TL_ERRNO_END(); return r;
+}
 static long b_pread64(int fd, void *p, size_t n, long off)
 {
     if (vfd_is(fd)) {
@@ -1027,8 +1031,8 @@ static int b_fcntl(int fd, int cmd, long arg)
                            .l_type = g->l_type == 0 ? F_RDLCK : g->l_type == 1 ? F_WRLCK : F_UNLCK, .l_whence = g->l_whence };
         int dcmd = (cmd == 5 || cmd == 12 || cmd == 36) ? F_GETLK : (cmd == 6 || cmd == 13 || cmd == 37) ? F_SETLK : F_SETLKW;
         r = fcntl(fd, dcmd, &f);
-        if (r < 0 && (errno == ENOTSUP || errno == ENOTTY)) {
-            /* Filesystems/mounts without POSIX locks: return 0 so SQLite doesn't abort */
+        if (r < 0 && (errno == ENOTSUP || errno == EOPNOTSUPP || errno == ENOTTY || errno == EINVAL || errno == EPERM || errno == EACCES)) {
+            /* Filesystems/mounts/sandboxes without POSIX locks: return 0 so SQLite doesn't abort */
             r = 0;
             errno = 0;
         }
@@ -1175,7 +1179,7 @@ static int prot_filter(int prot, const char *what)
  * and expect it to come back clean. Darwin's MADV_DONTNEED keeps the contents, so the pages are
  * replaced with fresh ones at the same protection instead.
  */
-#define MAX_ANON 4096
+#define MAX_ANON 16384
 static struct { uintptr_t addr; size_t len; } g_anon[MAX_ANON];
 static int g_nanon;
 static pthread_mutex_t g_anon_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1217,16 +1221,33 @@ static void anon_zap(uintptr_t addr, size_t len)
 {
     uintptr_t end = addr + len;
     pthread_mutex_lock(&g_anon_lock);
+    bool found = false;
     for (int i = 0; i < g_nanon; i++) {
         uintptr_t a = g_anon[i].addr > addr ? g_anon[i].addr : addr;
         uintptr_t e = g_anon[i].addr + g_anon[i].len < end ? g_anon[i].addr + g_anon[i].len : end;
         if (a >= e) continue;
+        found = true;
         for (uintptr_t p = a & ~(uintptr_t)16383; p < e;) {           /* walk the regions in the range */
             vm_address_t ra = p; vm_size_t rs = 0;
             vm_region_basic_info_data_64_t info; mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64; mach_port_t obj;
             if (vm_region_64(mach_task_self(), &ra, &rs, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &cnt, &obj) != KERN_SUCCESS) break;
             if (ra > p) { p = ra; continue; }
             uintptr_t re = ra + rs < e ? ra + rs : e;
+            if (tl_ld_covers((const void *)(uintptr_t)p, re - p) || tl_xmem_contains((const void *)(uintptr_t)p)) {
+                p = re; continue;
+            }
+            int prot = (info.protection & VM_PROT_READ ? PROT_READ : 0) | (info.protection & VM_PROT_WRITE ? PROT_WRITE : 0);
+            mmap((void *)p, re - p, prot, MAP_FIXED | MAP_PRIVATE | MAP_ANON, -1, 0);
+            p = re;
+        }
+    }
+    if (!found && !tl_ld_covers((const void *)addr, len) && !tl_xmem_contains((const void *)addr)) {
+        for (uintptr_t p = addr & ~(uintptr_t)16383; p < end;) {
+            vm_address_t ra = p; vm_size_t rs = 0;
+            vm_region_basic_info_data_64_t info; mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64; mach_port_t obj;
+            if (vm_region_64(mach_task_self(), &ra, &rs, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &cnt, &obj) != KERN_SUCCESS) break;
+            if (ra > p) { p = ra; continue; }
+            uintptr_t re = ra + rs < end ? ra + rs : end;
             if (tl_ld_covers((const void *)(uintptr_t)p, re - p) || tl_xmem_contains((const void *)(uintptr_t)p)) {
                 p = re; continue;
             }
@@ -1569,7 +1590,14 @@ static int b_madvise(void *a, size_t l, int adv)
     size_t real = phantom_clamp((uintptr_t)a, l);
     if (real == 0) return 0;
     l = real;
-    if (adv == 4) { anon_zap((uintptr_t)a, l); return 0; }  /* MADV_DONTNEED: zero-fill on next touch */
+    /* Linux MADV_DONTNEED (4), MADV_FREE (8), MADV_REMOVE (9), MADV_COLD (20), MADV_PAGEOUT (21) */
+    if (adv == 4 || adv == 8 || adv == 9 || adv == 20 || adv == 21) {
+        anon_zap((uintptr_t)a, l);
+#if TARGET_OS_IPHONE
+        madvise(a, l, MADV_FREE_REUSABLE);
+#endif
+        return 0;
+    }
     return 0;                                                /* the rest are hints */
 }
 static void *b_mremap(void *old, size_t olds, size_t news, int flags, void *newaddr)

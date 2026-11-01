@@ -255,16 +255,24 @@ static CTFontRef font_with_cascade(CTFontRef f)
         }
     }
 
-    CTFontDescriptorRef baseDesc = CTFontCopyFontDescriptor(f);
-    if (!baseDesc) { CFRelease(mutCascade); return f; }
     const void *keys[] = { kCTFontCascadeListAttribute };
     const void *vals[] = { mutCascade };
     CFDictionaryRef attrs = CFDictionaryCreate(NULL, keys, vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    CTFontDescriptorRef cascadedDesc = attrs ? CTFontDescriptorCreateCopyWithAttributes(baseDesc, attrs) : NULL;
-    CTFontRef outFont = cascadedDesc ? CTFontCreateWithFontDescriptor(cascadedDesc, CTFontGetSize(f), NULL) : NULL;
+    CTFontDescriptorRef cascadedDesc = attrs ? CTFontDescriptorCreateWithAttributes(attrs) : NULL;
+    CTFontRef outFont = cascadedDesc ? CTFontCreateCopyWithAttributes(f, fsize, NULL, cascadedDesc) : NULL;
+    if (!outFont) {
+        CTFontDescriptorRef baseDesc = CTFontCopyFontDescriptor(f);
+        if (baseDesc) {
+            CTFontDescriptorRef fullDesc = attrs ? CTFontDescriptorCreateCopyWithAttributes(baseDesc, attrs) : NULL;
+            if (fullDesc) {
+                outFont = CTFontCreateWithFontDescriptor(fullDesc, fsize, NULL);
+                CFRelease(fullDesc);
+            }
+            CFRelease(baseDesc);
+        }
+    }
     if (cascadedDesc) CFRelease(cascadedDesc);
     if (attrs) CFRelease(attrs);
-    CFRelease(baseDesc);
     CFRelease(mutCascade);
     if (outFont) {
         CFRelease(f);
@@ -320,12 +328,11 @@ static CTFontRef sized(gface *g, float size)
     unsigned h = ((unsigned)(uintptr_t)g * 2654435761u ^ (unsigned)q * 40503u) % 512;
     pthread_mutex_lock(&lock);
     if (cache[h].g == g && cache[h].q == q) { CTFontRef f = cache[h].f; CFRetain(f); pthread_mutex_unlock(&lock); return f; }
-    CTFontDescriptorRef desc = g->base ? CTFontCopyFontDescriptor(g->base) : NULL;
-    CTFontRef f = desc ? CTFontCreateWithFontDescriptor(desc, q / 8.0, NULL) : NULL;
-    if (desc) CFRelease(desc);
-    if (!f && g->base) f = CTFontCreateCopyWithAttributes(g->base, q / 8.0, NULL, NULL);
-    if (!f) f = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, q / 8.0, NULL);
-    if (f) f = font_with_cascade(f);
+    CTFontRef f = g->base ? CTFontCreateCopyWithAttributes(g->base, q / 8.0, NULL, NULL) : NULL;
+    if (!f) {
+        f = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, q / 8.0, NULL);
+        if (f) f = font_with_cascade(f);
+    }
     if (cache[h].f) CFRelease(cache[h].f);
     cache[h].g = g; cache[h].q = q; cache[h].f = f;
     CFRetain(f);
@@ -1433,12 +1440,28 @@ NAT(G_tfFromData)
     uint8_t *d = arr_data(a[0].l); uint32_t n = arr_len(a[0].l);
     *ret = J(0);
     if (!d || !n) return true;
-    CFDataRef data = CFDataCreate(NULL, d, n);
-    CTFontDescriptorRef desc = CTFontManagerCreateFontDescriptorFromData(data);
-    CFRelease(data);
-    if (!desc) return true;
-    CTFontRef f = font_with_cascade(CTFontCreateWithFontDescriptor(desc, 12, NULL));
-    CFRelease(desc);
+
+    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, d, n, NULL);
+    CGFontRef cgFont = provider ? CGFontCreateWithDataProvider(provider) : NULL;
+    if (provider) CGDataProviderRelease(provider);
+
+    CTFontRef baseFont = NULL;
+    if (cgFont) {
+        CTFontManagerRegisterGraphicsFont(cgFont, NULL);
+        baseFont = CTFontCreateWithGraphicsFont(cgFont, 12, NULL, NULL);
+        CGFontRelease(cgFont);
+    }
+    if (!baseFont) {
+        CFDataRef data = CFDataCreate(NULL, d, n);
+        CTFontDescriptorRef desc = data ? CTFontManagerCreateFontDescriptorFromData(data) : NULL;
+        if (data) CFRelease(data);
+        if (desc) {
+            baseFont = CTFontCreateWithFontDescriptor(desc, 12, NULL);
+            CFRelease(desc);
+        }
+    }
+    if (!baseFont) return true;
+    CTFontRef f = font_with_cascade(baseFont);
     gface *g = calloc(1, sizeof(*g));
     g->base = f; g->weight = 400;
     *ret = J((int64_t)(uintptr_t)g);
