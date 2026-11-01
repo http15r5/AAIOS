@@ -20,6 +20,9 @@ void *tl_nwindow_texture(void *window);
 void tl_nwindow_post(void *window, const void *rgba, int w, int h, bool flip);
 int tl_nwindow_height(void *window);
 
+extern void *objc_autoreleasePoolPush(void);
+extern void objc_autoreleasePoolPop(void *context);
+
 typedef void *EGLDisplay, *EGLSurface, *EGLContext, *EGLConfig, *EGLNativeWindowType;
 typedef int32_t EGLint;
 typedef unsigned EGLBoolean, EGLenum;
@@ -427,14 +430,20 @@ static void tex_swap(EGLDisplay d, EGLSurface s, void *win)
 }
 static EGLBoolean w_eglSwapBuffers(EGLDisplay d, EGLSurface s)
 {
+    void *pool = objc_autoreleasePoolPush();
     void *texwin = tex_window_of(s);
-    if (texwin) { tex_swap(d, s, texwin); return EGL_TRUE; }
+    if (texwin) {
+        tex_swap(d, s, texwin);
+        objc_autoreleasePoolPop(pool);
+        return EGL_TRUE;
+    }
     unsigned long n = atomic_fetch_add(&E.presented, 1) + 1;
     if (comp_surface(s)) {
         EGLint w = 0, h = 0;
         const uint8_t *px = read_back(d, s, &w, &h);
         if (px && tl_javaapp_app_pixels) tl_javaapp_app_pixels(px, w, h);
         if (n <= 3 || n % 600 == 0) tl_log_line("egl: swap #%lu (composited)", n);
+        objc_autoreleasePoolPop(pool);
         return EGL_TRUE;
     }
     if (n <= 3 || n % 600 == 0) {
@@ -450,7 +459,9 @@ static EGLBoolean w_eglSwapBuffers(EGLDisplay d, EGLSurface s)
         fprintf(stderr, "egl: calls so far, by function: %s\n", hist);
     }
     if (E.frame_dir[0] && (n % (unsigned long)E.frame_every == 0 || n <= 3)) save_frame(d, s, n);
-    return E.frame_dir[0] ? EGL_TRUE : a_eglSwapBuffers(d, s);
+    EGLBoolean res = E.frame_dir[0] ? EGL_TRUE : a_eglSwapBuffers(d, s);
+    objc_autoreleasePoolPop(pool);
+    return res;
 }
 
 /* The damage-region swaps (Flutter's engine, HWUI): the same as a whole swap here -- through the wrapper, so a frame reaches the

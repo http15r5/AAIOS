@@ -107,6 +107,13 @@ static struct sigaction g_prev[32];
 static void on_fatal(int sig, siginfo_t *info, void *uctx)
 {
     ucontext_t *uc = uctx;
+    char tn_fatal[40] = "";
+    pthread_getname_np(pthread_self(), tn_fatal, sizeof(tn_fatal));
+    if (sig == SIGABRT && (!strncmp(tn_fatal, "Streaming Pool", 14) || strstr(tn_fatal, "Pool") || strstr(tn_fatal, "Worker") || strstr(tn_fatal, "Async"))) {
+        tl_log_line("ld: caught worker thread SIGABRT on '%s', terminating worker safely", tn_fatal);
+        pthread_exit(NULL);
+        return;
+    }
     if (uc && (sig == SIGSEGV || sig == SIGBUS) && (uintptr_t)info->si_addr < 0x1000) {
         bool is_assert_trap = false;
         for (int r = 0; r < 29; r++) {

@@ -1013,11 +1013,11 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
         pthread_t me = pthread_self();
         uintptr_t top = (uintptr_t)pthread_get_stackaddr_np(me);
         size_t sz = pthread_get_stacksize_np(me);
-        size_t reserve = (sz >= (2u << 20)) ? (128u << 10) : (sz >= (1u << 20) ? (64u << 10) : (32u << 10));
-        t_stack_low = top - sz + reserve;
+        t_stack_low = (top > sz) ? (top - sz) : 0;
     }
     uintptr_t sp = (uintptr_t)__builtin_frame_address(0);
-    if (t_depth > (t_overflowing ? 600 : 500) || (t_stack_low && sp < t_stack_low + (t_overflowing ? 0 : 16384))) {
+    bool phys_overflow = (t_depth > 120 && t_stack_low && sp < t_stack_low + (t_overflowing ? 8192 : 16384));
+    if (t_depth > (t_overflowing ? 600 : 500) || phys_overflow) {
         t_depth--;
         if (t_overflowing) return false;
         t_overflowing = true;

@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <malloc/malloc.h>
+#include <sys/mman.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <strings.h>
@@ -662,6 +663,30 @@ static void *b_memalign(size_t align, size_t size)
     return p;
 }
 
+#define HUSK_MMAP_MAGIC 0x4855534B4D4D4150ull
+typedef struct {
+    uint64_t magic;
+    size_t size;
+    uint64_t reserved[2];
+} husk_mmap_hdr_t;
+
+static void *b_malloc(size_t sz)
+{
+    size_t n = sz ? sz : 1;
+    void *p = malloc(n);
+    if (!p) p = malloc_zone_malloc(malloc_default_zone(), n);
+    return p;
+}
+
+static void *b_calloc(size_t num, size_t sz)
+{
+    size_t total = num * sz;
+    if (!total) total = 1;
+    void *p = calloc(num, sz);
+    if (!p) p = malloc_zone_calloc(malloc_default_zone(), num, sz);
+    return p;
+}
+
 /* Darwin's malloc aborts on free of a pointer that is not from malloc. AOT mixed pages
  * can hand Unity a pointer into the signed image (a global, or the unrelocated view of a
  * heap field); that is not a heap block. */
@@ -671,20 +696,49 @@ static bool heap_is_image(const void *p)
 }
 static void b_free(void *p)
 {
-    if (!p) return;
+    if (!p || (uintptr_t)p < 0x10000ull) return;
     if (heap_is_image(p)) {
         static int n; if (n++ < 12) tl_log_line("bionic: free(%p) of a loaded library: ignored", p);
         return;
+    }
+    if (((uintptr_t)p & 0x3FFF) == sizeof(husk_mmap_hdr_t)) {
+        husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)p - 1;
+        if (hdr->magic == HUSK_MMAP_MAGIC) {
+            size_t psz = hdr->size;
+            if (psz >= 0x4000 && (psz & 0x3FFF) == 0 && psz < 0x40000000ull) {
+                hdr->magic = 0;
+                munmap(hdr, psz);
+                return;
+            }
+        }
     }
     free(p);
 }
 static void *b_realloc(void *p, size_t n)
 {
+    if (!p) return b_malloc(n);
     if (heap_is_image(p)) {
         static int k; if (k++ < 8) tl_log_line("bionic: realloc(%p, %zu) of a loaded library: a fresh block", p, n);
-        return malloc(n);
+        return b_malloc(n);
     }
-    return realloc(p, n);
+    if (((uintptr_t)p & 0x3FFF) == sizeof(husk_mmap_hdr_t)) {
+        husk_mmap_hdr_t *hdr = (husk_mmap_hdr_t *)p - 1;
+        if (hdr->magic == HUSK_MMAP_MAGIC) {
+            void *fresh = b_malloc(n);
+            if (fresh) {
+                size_t old_sz = hdr->size > sizeof(husk_mmap_hdr_t) ? (hdr->size - sizeof(husk_mmap_hdr_t)) : 0;
+                size_t copy_sz = n < old_sz ? n : old_sz;
+                memcpy(fresh, p, copy_sz);
+                b_free(p);
+            }
+            return fresh;
+        }
+    }
+    void *np = realloc(p, n ? n : 1);
+    if (!np && n > 0) {
+        np = malloc_zone_realloc(malloc_default_zone(), p, n);
+    }
+    return np;
 }
 
 /* The floating-point environment: bionic's fenv_t is two words of its own layout, and nothing here turns on exceptions or rounding, so these report success. */
@@ -921,7 +975,7 @@ const tl_bionic_entry tl_tab_str[] = {
     TL_WRAP("wcstold", b_wcstold),
     TL_WRAP("swprintf", tl_va_swprintf),
     /* stdlib.h */
-    TL_DIRECT(malloc), TL_DIRECT(calloc), TL_WRAP("realloc", b_realloc), TL_WRAP("free", b_free), TL_DIRECT(posix_memalign),
+    TL_WRAP("malloc", b_malloc), TL_WRAP("calloc", b_calloc), TL_WRAP("realloc", b_realloc), TL_WRAP("free", b_free), TL_DIRECT(posix_memalign),
     TL_WRAP("memalign", b_memalign),
     TL_DIRECT(atoi), TL_DIRECT(atol), TL_DIRECT(atoll), TL_DIRECT(bsearch), TL_DIRECT(qsort), TL_DIRECT(div), TL_DIRECT(lldiv),
     TL_DIRECT(rand), TL_DIRECT(srand), TL_DIRECT(srand48), TL_DIRECT(lrand48),
