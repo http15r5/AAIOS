@@ -21,12 +21,9 @@ struct SettingsTab: View {
                     }
                 }
 
-                Section {
+                Section("JIT") {
                     row(JITSettings(), "bolt.fill", .yellow, "JIT & Sideload", "StikJIT is built in — the recommended way")
-                } header: {
-                    Text("JIT")
-                } footer: {
-                    Text("Android and Translation Layer games need JIT. StikJIT, built into Husk, turns it on without a computer.")
+                    row(JITLessSettings(), "bolt.slash.fill", .mint, "Play without JIT", "No debugger")
                 }
 
                 Section("General") {
@@ -99,9 +96,6 @@ struct SettingsTab: View {
                     row(SavedMachineSettings(), "externaldrive.fill", .teal, "Saved Machine", "Snapshots and automatic saving")
                 } header: {
                     Text("Android Emulator")
-                } footer: {
-                    Text("Full Android runs in an emulator, for the apps the Translation Layer can't run yet. It is experimental: slow, "
-                       + "and it can freeze or crash.")
                 }
             }
             .listStyle(.insetGrouped)
@@ -538,6 +532,93 @@ struct NetworkSettings: View {
     }
 }
 
+// MARK: - Play without JIT
+
+struct JITLessSettings: View {
+    @AppStorage(JITLess.key) private var jitless = false
+    @ObservedObject private var certificate = SigningCertificate.shared
+    @State private var pickedP12: Data?
+    @State private var p12Password = ""
+    @State private var cacheBytes = JITLess.cacheBytes
+
+    var body: some View {
+        HuskForm {
+            Section {
+                Toggle("Play without JIT", isOn: $jitless)
+                if cacheBytes > 0 {
+                    DetailRow(label: "Converted games", value: ByteCountFormatter.string(fromByteCount: cacheBytes, countStyle: .file), mono: false)
+                    Button(role: .destructive) {
+                        JITLess.clearCache(); cacheBytes = JITLess.cacheBytes
+                    } label: { Label("Remove Converted Games", systemImage: "trash") }
+                }
+            }
+            .onAppear { cacheBytes = JITLess.cacheBytes }
+
+            Section {
+                if let info = certificate.info {
+                    DetailRow(label: "Team", value: info.teamID)
+                    DetailRow(label: "Expires", value: info.expires.formatted(date: .abbreviated, time: .shortened), mono: false)
+                    if info.expires < Date() {
+                        Text("This certificate has expired. Refresh Husk in your store, then import its certificate again.")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                } else {
+                    DetailRow(label: "Certificate", value: "not imported", mono: false)
+                }
+                ForEach(SigningCertificate.Store.allCases) { store in
+                    Button {
+                        certificate.requestFromStore(store)
+                    } label: { Label("Import from \(store.title)", systemImage: "arrow.down.circle") }
+                }
+                Button {
+                    HuskFilePicker.present(types: [.pkcs12, .data], multiple: false, asCopy: true, onPick: { urls in
+                        guard let url = urls.first else { return }
+                        let scoped = url.startAccessingSecurityScopedResource()
+                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                        guard let data = try? Data(contentsOf: url) else { certificate.lastError = "That file could not be read."; return }
+                        p12Password = ""
+                        pickedP12 = data
+                    }, onFail: { certificate.lastError = $0 })
+                } label: { Label("Import .p12 File", systemImage: "doc.badge.plus") }
+                if certificate.info != nil {
+                    Button(role: .destructive) { certificate.remove() } label: { Label("Remove Certificate", systemImage: "trash") }
+                }
+                if let why = certificate.lastError {
+                    Text(why).font(.caption).foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Certificate")
+            }
+        }
+        .huskForm()
+        .navigationTitle("Play without JIT")
+        .sheet(isPresented: Binding(get: { pickedP12 != nil }, set: { if !$0 { pickedP12 = nil } })) {
+            NavigationView {
+                Form {
+                    Section {
+                        SecureField("Password", text: $p12Password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } footer: {
+                        Text("Enter the password for the private key. Leave it blank if no password is required.")
+                    }
+                }
+                .navigationTitle("Certificate Password")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { pickedP12 = nil } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Import") {
+                            if let data = pickedP12 { certificate.importP12(data, password: p12Password) }
+                            pickedP12 = nil
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - JIT and sideloading
 
 struct JITSettings: View {
@@ -547,11 +628,6 @@ struct JITSettings: View {
     @AppStorage(JITCoordinator.autoEnableKey) private var autoJIT = false
     @AppStorage(JITCoordinator.trollStoreAutoKey) private var trollStoreJIT = true
     @State private var keepAttached = JITBootstrap.keepDebuggerAttached
-    @AppStorage(JITLess.key) private var jitless = false
-    @ObservedObject private var certificate = SigningCertificate.shared
-    @State private var pickedP12: Data?
-    @State private var p12Password = ""
-    @State private var cacheBytes = JITLess.cacheBytes
 
     private var pairingLabel: String {
         switch jit.pairingSource {
@@ -561,171 +637,98 @@ struct JITSettings: View {
         }
     }
 
-    private var experimentalSection: some View {
-        Section {
-            Toggle("JIT-less Mode", isOn: $jitless)
-            DetailRow(label: "Prebuilt games", value: JITLess.libraryCount > 0 ? "Geometry Dash" : "none in this build", mono: false)
-            if cacheBytes > 0 {
-                DetailRow(label: "Converted games", value: ByteCountFormatter.string(fromByteCount: cacheBytes, countStyle: .file), mono: false)
-                Button(role: .destructive) {
-                    JITLess.clearCache(); cacheBytes = JITLess.cacheBytes
-                } label: { Label("Remove Converted Games", systemImage: "trash") }
+    var body: some View {
+        HuskForm {
+            Section {
+                JITCard()
             }
-        } header: {
-            Text("Experimental")
-        } footer: {
-            Text("Android games run without JIT: their code is converted once and signed with your developer certificate, so no debugger is needed. The first start of each game takes a few seconds longer. Geode mods and engines that make code while they run still need JIT. While this is on, Husk makes no executable memory, even when JIT is on.")
-        }
-        .onAppear { cacheBytes = JITLess.cacheBytes }
-    }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
 
-    private var certificateSection: some View {
-        Section {
-            if let info = certificate.info {
-                DetailRow(label: "Team", value: info.teamID)
-                DetailRow(label: "Expires", value: info.expires.formatted(date: .abbreviated, time: .shortened), mono: false)
-                if info.expires < Date() {
-                    Text("This certificate has expired. Refresh Husk in your store, then import its certificate again.")
-                        .font(.caption).foregroundStyle(.orange)
+            Section {
+                Picker("Method", selection: $jit.method) {
+                    ForEach(JITMethod.allCases) { Text($0.title).tag($0) }
                 }
-            } else {
-                DetailRow(label: "Certificate", value: "not imported", mono: false)
-            }
-            ForEach(SigningCertificate.Store.allCases) { store in
+                DetailRow(label: "StikDebug",
+                          value: JITBootstrap.isStikDebugInstalled ? "installed" : "not found", mono: false)
+                DetailRow(label: "TrollStore",
+                          value: JITBootstrap.isTrollStoreInstalled ? "installed" : "not found", mono: false)
+                DetailRow(label: "Installed with TrollStore",
+                          value: JITBootstrap.isInstalledWithTrollStore ? "yes" : "no", mono: false)
+                DetailRow(label: "Jailbreak",
+                          value: JITBootstrap.debuggedAtLaunch ? "JIT allowed for apps"
+                               : JITBootstrap.isJailbroken ? "found" : "not found", mono: false)
+                DetailRow(label: "Built-in pairing", value: pairingLabel, mono: false)
                 Button {
-                    certificate.requestFromStore(store)
-                } label: { Label("Import from \(store.title)", systemImage: "arrow.down.circle") }
-            }
-            Button {
-                HuskFilePicker.present(types: [.pkcs12, .data], multiple: false, onPick: { urls in
-                    guard let url = urls.first else { return }
-                    let scoped = url.startAccessingSecurityScopedResource()
-                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    guard let data = try? Data(contentsOf: url) else { certificate.lastError = "That file could not be read."; return }
-                    p12Password = ""
-                    pickedP12 = data
-                }, onFail: { certificate.lastError = $0 })
-            } label: { Label("Import .p12 File", systemImage: "doc.badge.plus") }
-            if certificate.info != nil {
-                Button(role: .destructive) { certificate.remove() } label: { Label("Remove Certificate", systemImage: "trash") }
-            }
-            if let why = certificate.lastError {
-                Text(why).font(.caption).foregroundStyle(.orange)
-            }
-        } header: {
-            Text("Signing Certificate")
-        } footer: {
-            let teamDesc = SigningCertificate.installedTeamID.map { "(team \($0))" } ?? ""
-            Text("JIT-less mode signs converted games with the certificate your store installed Husk with \(teamDesc). SideStore and AltStore can hand it over; or import the .p12 file and its password. It stays in this device's Keychain. A free Apple ID's certificate changes every 7 days: import it again after refreshing Husk, and games are signed again on their next start.")
-        }
-    }
-
-    private var passwordSheet: some View {
-        NavigationView {
-            Form {
-                Section {
-                    SecureField("Password (empty if none)", text: $p12Password)
-                        .textContentType(.password)
-                } footer: {
-                    Text("The password the .p12 file was exported with.")
+                    jit.showSetup = true
+                } label: {
+                    Label("Set up JIT", systemImage: "wand.and.stars")
                 }
+            } header: {
+                Text("Other Ways to Turn On JIT")
+            } footer: {
+                Text(jit.method == .automatic
+                     ? jit.automaticDescription + " Built-in StikJIT needs iOS 26, LocalDevVPN, and a "
+                       + "pairing file, which Husk can make itself on iOS 27."
+                     : HuskBuiltInJIT.unavailableReason ?? "Built-in StikJIT needs LocalDevVPN and a pairing "
+                       + "file, which Husk can make itself on iOS 27.")
             }
-            .navigationTitle("Certificate Password")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { pickedP12 = nil } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Import") {
-                        if let data = pickedP12 { certificate.importP12(data, password: p12Password) }
-                        pickedP12 = nil
+
+            Section {
+                DetailRow(label: "Debugger",
+                          value: JITBootstrap.isDebuggerAttached ? "attached" : "not attached",
+                          mono: false)
+                DetailRow(label: "Executable memory",
+                          value: JITBootstrap.isLive ? "granted" : "not claimed", mono: false)
+                // The two routes, named separately. Either one is enough, and
+                // when someone reports "JIT does not work" these two rows are
+                // the whole diagnosis.
+                DetailRow(label: "Trap servicer",
+                          value: husk_ios_jit_self_route() != nil ? "not needed"
+                               : JITBootstrap.prewarmed ? "answering" : "not answering",
+                          mono: false)
+                if let route = husk_ios_jit_self_route() {
+                    DetailRow(label: "Made by Husk",
+                              value: String(cString: route) == "MAP_JIT" ? "MAP_JIT (dynamic-codesigning)" : "plain memory (debugged or jailbroken)",
+                              mono: false)
+                }
+                // Cached answer only: running the probe from a view body
+                // could freeze the app (see JITBootstrap.mapJITWorks).
+                DetailRow(label: "MAP_JIT",
+                          value: JITBootstrap.deviceEnforcesTXM ? "not used (TXM)"
+                               : JITBootstrap.mapJITResult.map { $0 ? "executes" : "refused" }
+                                 ?? "not tested",
+                          mono: false)
+                DetailRow(label: "Debugger after setup",
+                          value: JITBootstrap.detached ? "detached" : "attached",
+                          mono: false)
+                if let why = JITBootstrap.lastFailure {
+                    Text(why).font(.caption).foregroundStyle(.orange)
+                }
+                if !JITBootstrap.ready {
+                    Button {
+                        jit.enable()
+                    } label: {
+                        Label("Enable JIT with \(jit.resolvedMethod.title)", systemImage: "bolt.fill")
+                    }
+                    .disabled(jit.busy)
+                    Button {
+                        _ = JITBootstrap.requestTrollStoreAttach()
+                    } label: {
+                        Label("Enable JIT with TrollStore", systemImage: "sparkles")
                     }
                 }
+            } header: {
+                Text("JIT")
+            } footer: {
+                Text("Husk needs memory it can write and then execute, which on iOS "
+                   + "takes an attached debugger. There are two ways to get it: a "
+                   + "debugger that services trap requests, or a MAP_JIT mapping, "
+                   + "which the kernel allows any debugged process. Either one is "
+                   + "enough — which is available depends on the device and the iOS "
+                   + "version, so Husk tests both rather than assuming.")
             }
-        }
-    }
 
-    private var methodSection: some View {
-        Section {
-            Picker("Method", selection: $jit.method) {
-                ForEach(JITMethod.allCases) { Text($0.title).tag($0) }
-            }
-            DetailRow(label: "StikDebug",
-                      value: JITBootstrap.isStikDebugInstalled ? "installed" : "not found", mono: false)
-            DetailRow(label: "TrollStore",
-                      value: JITBootstrap.isTrollStoreInstalled ? "installed" : "not found", mono: false)
-            DetailRow(label: "Installed with TrollStore",
-                      value: JITBootstrap.isInstalledWithTrollStore ? "yes" : "no", mono: false)
-            DetailRow(label: "Jailbreak",
-                      value: JITBootstrap.debuggedAtLaunch ? "JIT allowed for apps"
-                           : JITBootstrap.isJailbroken ? "found" : "not found", mono: false)
-            DetailRow(label: "Built-in pairing", value: pairingLabel, mono: false)
-            Button {
-                jit.showSetup = true
-            } label: {
-                Label("Set up JIT", systemImage: "wand.and.stars")
-            }
-        } header: {
-            Text("Other Ways to Turn On JIT")
-        } footer: {
-            if jit.method == .automatic {
-                Text("\(jit.automaticDescription) Built-in StikJIT needs iOS 26, LocalDevVPN, and a pairing file, which Husk can make itself on iOS 27.")
-            } else if let reason = HuskBuiltInJIT.unavailableReason {
-                Text(reason)
-            } else {
-                Text("Built-in StikJIT needs LocalDevVPN and a pairing file, which Husk can make itself on iOS 27.")
-            }
-        }
-    }
-
-    private var statusSection: some View {
-        Section {
-            DetailRow(label: "Debugger",
-                      value: JITBootstrap.isDebuggerAttached ? "attached" : "not attached",
-                      mono: false)
-            DetailRow(label: "Executable memory",
-                      value: JITBootstrap.isLive ? "granted" : "not claimed", mono: false)
-            DetailRow(label: "Trap servicer",
-                      value: husk_ios_jit_self_route() != nil ? "not needed"
-                           : JITBootstrap.prewarmed ? "answering" : "not answering",
-                      mono: false)
-            if let route = husk_ios_jit_self_route() {
-                DetailRow(label: "Made by Husk",
-                          value: String(cString: route) == "MAP_JIT" ? "MAP_JIT (dynamic-codesigning)" : "plain memory (debugged or jailbroken)",
-                          mono: false)
-            }
-            DetailRow(label: "MAP_JIT",
-                      value: JITBootstrap.deviceEnforcesTXM ? "not used (TXM)"
-                           : JITBootstrap.mapJITResult.map { $0 ? "executes" : "refused" }
-                             ?? "not tested",
-                      mono: false)
-            DetailRow(label: "Debugger after setup",
-                      value: JITBootstrap.detached ? "detached" : "attached",
-                      mono: false)
-            if let why = JITBootstrap.lastFailure {
-                Text(why).font(.caption).foregroundStyle(.orange)
-            }
-            if !JITBootstrap.ready {
-                Button {
-                    jit.enable()
-                } label: {
-                    Label("Enable JIT with \(jit.resolvedMethod.title)", systemImage: "bolt.fill")
-                }
-                .disabled(jit.busy)
-                Button {
-                    _ = JITBootstrap.requestTrollStoreAttach()
-                } label: {
-                    Label("Enable JIT with TrollStore", systemImage: "sparkles")
-                }
-            }
-        } header: {
-            Text("JIT")
-        } footer: {
-            Text("Husk needs memory it can write and then execute, which on iOS takes an attached debugger. There are two ways to get it: a debugger that services trap requests, or a MAP_JIT mapping, which the kernel allows any debugged process. Either one is enough — which is available depends on the device and the iOS version, so Husk tests both rather than assuming.")
-        }
-    }
-
-    private var launchSection: some View {
-        Group {
             if JITBootstrap.isInstalledWithTrollStore {
                 Section {
                     Toggle("Turn On JIT with TrollStore at Launch", isOn: $trollStoreJIT)
@@ -758,37 +761,21 @@ struct JITSettings: View {
                 Toggle("Keep debugger attached", isOn: $keepAttached)
                     .onChange(of: keepAttached) { v in JITBootstrap.keepDebuggerAttached = v }
             } footer: {
-                Text("Off by default. Husk detaches StikDebug as soon as the JIT region is held, because a debugger that iOS has suspended stops the whole app the next time it is needed. Turn this on only to collect StikDebug's own logs.")
+                Text("Off by default. Husk detaches StikDebug as soon as the "
+                   + "JIT region is held, because a debugger that iOS has suspended "
+                   + "stops the whole app the next time it is needed. Turn this on "
+                   + "only to collect StikDebug's own logs.")
             }
-        }
-    }
 
-    private var sideloadSection: some View {
-        Section {
-            Text("APKs install from the Library's + button or from the Files tab. Split sets — a base APK plus its config pieces — must be picked together; installing the base alone fails on missing native libraries.")
-                .font(.footnote).foregroundStyle(.secondary)
-        } header: {
-            Text("Sideloading")
-        }
-    }
-
-    var body: some View {
-        HuskForm {
             Section {
-                JITCard()
+                Text("APKs install from the Library's + button or from the Files tab. "
+                   + "Split sets — a base APK plus its config pieces — must be picked "
+                   + "together; installing the base alone fails on missing native "
+                   + "libraries.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: {
+                Text("Sideloading")
             }
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-
-            experimentalSection
-            certificateSection
-            methodSection
-            statusSection
-            launchSection
-            sideloadSection
-        }
-        .sheet(isPresented: Binding(get: { pickedP12 != nil }, set: { if !$0 { pickedP12 = nil } })) {
-            passwordSheet
         }
         .huskForm()
         .navigationTitle("JIT & sideload")

@@ -604,7 +604,19 @@ NAT(VMR_properties)
     *ret = L(string_array(v, (int)(sizeof(v) / sizeof(v[0]))));
     return true;
 }
-NAT(VMR_getRuntime) { UNUSED; return true; }
+NAT(VMR_getRuntime)
+{
+    UNUSED;
+    static jobj *rt;
+    if (!rt) {
+        tl_jclass *jc = dvm_class_named("dalvik/system/VMRuntime");
+        if (!jc) { *ret = L(NULL); return true; }
+        rt = dvm_new_object(jc);
+        rt->refs = 1u << 30;
+    }
+    *ret = L(rt);
+    return true;
+}
 NAT(VMR_zero) { UNUSED; ret->j = 0; return true; }
 NAT(VMR_true) { UNUSED; *ret = Z(true); return true; }
 NAT(VMR_isa) { UNUSED; *ret = L(dvm_new_string_utf8("arm64")); return true; }
@@ -970,10 +982,7 @@ NAT(Runtime_nativeLoad)
     bool tl_bionic_is_system_lib(const char *soname);
     /* a library Husk itself provides (/system/lib64/liblog.so): there already */
     if (tl_bionic_is_system_lib(slash ? slash + 1 : path)) { *ret = L(NULL); return true; }
-    if (!tl_dvm_load_library(path)) {
-        tl_log_line("dvm: ADAPTIVE: Runtime.nativeLoad(\"%s\") not found in APK - stubbing cleanly", path);
-    }
-    *ret = L(NULL);
+    *ret = L(tl_dvm_load_library(path) ? NULL : dvm_new_string_utf8("could not load library"));
     return true;
 }
 
@@ -2048,6 +2057,17 @@ static const entry k_natives[] = {
     { "java/lang/System", "setOut0", "(Ljava/io/PrintStream;)V", System_setStream },
     { "java/lang/System", "setErr0", "(Ljava/io/PrintStream;)V", System_setStream },
 
+    { "dalvik/system/VMRuntime", "getRuntime", "()Ldalvik/system/VMRuntime;", VMR_getRuntime },
+    { "dalvik/system/VMRuntime", "setHiddenApiExemptions", "([Ljava/lang/String;)V", Native_noop },
+    { "dalvik/system/VMRuntime", "setHiddenApiExemptionsNative", "([Ljava/lang/String;)V", Native_noop },
+    { "dalvik/system/VMRuntime", "setTargetSdkVersionNative", "(I)V", Native_noop },
+    { "dalvik/system/VMRuntime", "disableJitCompilation", "()V", Native_noop },
+    { "dalvik/system/VMRuntime", "registerNativeAllocation", "(J)V", Native_noop },
+    { "dalvik/system/VMRuntime", "registerNativeFree", "(J)V", Native_noop },
+    { "dalvik/system/VMRuntime", "notifyNativeAllocationsInternal", "()V", Native_noop },
+    { "dalvik/system/VMRuntime", "preloadDexCaches", "()V", Native_noop },
+    { "dalvik/system/VMRuntime", "updateProcessState", "(I)V", Native_noop },
+    { "dalvik/system/VMRuntime", "isJavaDebuggable", "()Z", VMR_zero },
     { "dalvik/system/VMRuntime", "properties", "()[Ljava/lang/String;", VMR_properties },
     { "dalvik/system/VMRuntime", "is64Bit", "()Z", VMR_true },
     { "dalvik/system/VMRuntime", "vmInstructionSet", "()Ljava/lang/String;", VMR_isa },
@@ -2283,6 +2303,7 @@ dvm_native_fn dvm_intrinsic(const char *cls, const char *name, const char *sig)
     { dvm_native_fn dvm_dexfile_native(const char *, const char *, const char *); dvm_native_fn f = dvm_dexfile_native(cls, name, sig); if (f) return f; }
     /* Husk's Java framework (husk.Native, GLES20) */
     { dvm_native_fn dvm_android_native(const char *, const char *, const char *); dvm_native_fn f = dvm_android_native(cls, name, sig); if (f) return f; }
+    { dvm_native_fn dvm_binder_native(const char *, const char *, const char *); dvm_native_fn f = dvm_binder_native(cls, name, sig); if (f) return f; }
     /* the runtime's housekeeping (heap tuning, debugging hooks): nothing to do here, and zero is the quiet answer */
     if (!strcmp(cls, "dalvik/system/VMRuntime") || !strcmp(cls, "dalvik/system/VMDebug") || !strcmp(cls, "dalvik/system/ZygoteHooks"))
         return VMR_zero;
@@ -2298,10 +2319,7 @@ NAT(System_loadLibrary)
     const char *n = tl_jni_string(a[0].l);
     if (!n) return npe("libname");
     char base[300]; snprintf(base, sizeof(base), "lib%s.so", n);
-    if (!tl_dvm_load_library(base)) {
-        tl_log_line("dvm: ADAPTIVE: System.loadLibrary(\"%s\") not found - providing stub", base);
-        return true;
-    }
+    if (!tl_dvm_load_library(base)) return dvm_throw("java/lang/UnsatisfiedLinkError", "dlopen failed: library \"%s\" not found", base);
     return !tl_jni_pending();
 }
 NAT(System_load)
@@ -2309,10 +2327,7 @@ NAT(System_load)
     (void)self; (void)ret;
     const char *n = tl_jni_string(a[0].l);
     if (!n) return npe("path");
-    if (!tl_dvm_load_library(n)) {
-        tl_log_line("dvm: ADAPTIVE: System.load(\"%s\") not found - providing stub", n);
-        return true;
-    }
+    if (!tl_dvm_load_library(n)) return dvm_throw("java/lang/UnsatisfiedLinkError", "dlopen failed: library \"%s\" not found", n);
     return !tl_jni_pending();
 }
 
