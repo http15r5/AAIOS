@@ -997,15 +997,51 @@ static void Scanner_next(tl_jcall *c)
 
 /* ------------------------------------------- collections, services, misc */
 
-static void Map_entrySet(tl_jcall *c) { c->ret = vl(make("java/util/HashSet")); }
+static jobj *new_hash_map(void)
+{
+    tl_jclass *cls = tl_jni_class("java/util/HashMap");
+    jobj *map = tl_jni_new_object(cls);
+    if (!map) return NULL;
+    if (tl_dvm) {
+        tl_jmeth *init = tl_jni_method(cls, "<init>", "()V", false);
+        if (init) tl_jni_invoke(map, init, true, NULL);
+    }
+    return map;
+}
+
+static jobj *new_hash_set(void)
+{
+    tl_jclass *cls = tl_jni_class("java/util/HashSet");
+    jobj *set = tl_jni_new_object(cls);
+    if (!set) return NULL;
+    if (tl_dvm) {
+        tl_jmeth *init = tl_jni_method(cls, "<init>", "()V", false);
+        if (init) tl_jni_invoke(set, init, true, NULL);
+    }
+    return set;
+}
+
+static jobj *new_array_list(void)
+{
+    tl_jclass *cls = tl_jni_class("java/util/ArrayList");
+    jobj *list = tl_jni_new_object(cls);
+    if (!list) return NULL;
+    if (tl_dvm) {
+        tl_jmeth *init = tl_jni_method(cls, "<init>", "()V", false);
+        if (init) tl_jni_invoke(list, init, true, NULL);
+    }
+    return list;
+}
+
+static void Map_entrySet(tl_jcall *c) { c->ret = vl(new_hash_set()); }
 static void Set_iterator(tl_jcall *c) { c->ret = vl(make("java/util/Iterator")); }
 static void Coll_size(tl_jcall *c) { c->ret = vi(0); }
 static void Coll_isEmpty(tl_jcall *c) { c->ret = vz(1); }
-static void SP_getAll(tl_jcall *c) { c->ret = vl(make("java/util/HashMap")); }
+static void SP_getAll(tl_jcall *c) { c->ret = vl(new_hash_map()); }
 static void Intent_getExtras(tl_jcall *c) { c->ret = vl(NULL); }
 static void Intent_init_action(tl_jcall *c) { tl_jni_set_field(c->self, "action", "Ljava/lang/String;", vl(c->args[0].l)); }
 static void Intent_self(tl_jcall *c) { c->ret = vl(c->self); }
-static void PM_queryIntentActivities(tl_jcall *c) { (void)c; c->ret = vl(make("java/util/ArrayList")); }
+static void PM_queryIntentActivities(tl_jcall *c) { (void)c; c->ret = vl(new_array_list()); }
 static void Context_getObbDir(tl_jcall *c) { char p[700]; snprintf(p, sizeof(p), "%s/obb", H.ext_files); mkdirs(p); c->ret = vl(new_file(p)); }
 static void Context_getObbDirs(tl_jcall *c)
 {

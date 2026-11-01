@@ -50,9 +50,9 @@ jobj *tl_jni_ref(jobj *o) { if (o) __atomic_add_fetch(&o->refs, 1, __ATOMIC_RELA
 void tl_jni_unref(jobj *o)
 {
     if (!o || o->kind == TL_K_CLASS) return;
-    /* DVM-managed objects have refs >= (1 << 29) (pinned at 1 << 30) so they are kept alive.
-     * Temporary JNI/HLE objects (refs < 1 << 29) are ref-counted and freed on DeleteLocalRef/unref. */
-    if (tl_dvm && o->refs >= (1u << 29)) return;
+    /* With the Java runtime up, objects live as long as Java can reach them, which reference counts from native code do not
+     * know about: nothing is freed here (a tracing collector's job). */
+    if (tl_dvm) return;
     if (__atomic_sub_fetch(&o->refs, 1, __ATOMIC_ACQ_REL) != 0) return;
     switch (o->kind) {
     case TL_K_STRING: free(o->str.utf8); free(o->str.u16); break;
@@ -297,8 +297,14 @@ static tl_jmeth *lookup_method(tl_jclass *cls, const char *name, const char *sig
             tl_jmeth *m = calloc(1, sizeof(*m));
             m->cls = cls; m->name = strdup(name); m->sig = strdup(sig); m->is_static = is_static;
             m->dvm = dm; m->exists = true;
-            m->fn = hle_find(cls->name, name, sig);
-            if (!m->fn) m->fn = hle_find_loose(cls->name, name, sig);
+            bool is_core = !strncmp(cls->name, "java/util/", 10) ||
+                           !strncmp(cls->name, "java/lang/", 10) ||
+                           !strncmp(cls->name, "java/io/", 8) ||
+                           !strncmp(cls->name, "android/content/SharedPreferences", 32);
+            if (!is_core) {
+                m->fn = hle_find(cls->name, name, sig);
+                if (!m->fn) m->fn = hle_find_loose(cls->name, name, sig);
+            }
             parse_sig(m);
             pthread_mutex_lock(&g_lock);
             if (cls->nmeths == cls->capm) { cls->capm = cls->capm ? cls->capm * 2 : 8; cls->meths = realloc(cls->meths, (size_t)cls->capm * sizeof(*cls->meths)); }
@@ -494,6 +500,24 @@ static jvalue g_zero;
 
 static jvalue invoke(jobj *self, tl_jmeth *m, bool nonvirtual, const jvalue *args)
 {
+    /* If DVM has bytecode for this method, let DVM execute it -- especially for core Java
+     * runtime classes (java/lang, java/util, java/io, android/content, etc.) where real implementations
+     * must never be replaced by dummy HLE stubs like Set_iterator or SP_getAll. */
+    if (m->dvm && tl_dvm) {
+        bool is_core = !strncmp(m->cls->name, "java/util/", 10) ||
+                       !strncmp(m->cls->name, "java/lang/", 10) ||
+                       !strncmp(m->cls->name, "java/io/", 8) ||
+                       !strncmp(m->cls->name, "android/content/SharedPreferences", 32);
+        if (is_core || !m->fn) {
+            jvalue r = tl_dvm->invoke(m->dvm, self, nonvirtual, args);
+            if (g_trace >= 3) {
+                tl_log_line("jni: java call %s.%s%s on %p -> %#llx%s", m->cls->name, m->name, m->sig, (void *)self, (unsigned long long)r.j, t_pending ? " (threw)" : "");
+                if (t_pending) jni_ExceptionDescribe(NULL);
+            }
+            if (m->retk == 'L' && r.l && ((jobj *)r.l)->kind != TL_K_CLASS) tl_jni_ref(r.l);
+            return r;
+        }
+    }
     /* A host implementation wins over the APK's bytecode: Subway's AnalyticsBridge.SetupWorkerForAppClosed
      * is in the DEX and throws if WorkManager is missing. */
     tl_jcall c = { .self = self, .cls = m->cls, .args = args };

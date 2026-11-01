@@ -600,6 +600,15 @@ static int b_open(const char *path, int flags, unsigned mode)
         { static int tr = -1; if (tr < 0) tr = getenv("TL_FILE_TRACE") ? atoi(getenv("TL_FILE_TRACE")) : 0; if (tr) tl_log_line("file: open(%s) -> %d (virtual: %llu bytes at %llu of %s)%s", path, fd, (unsigned long long)vf->size, (unsigned long long)vf->off, vf->host, fd < 0 ? (e == ENOENT ? " ENOENT" : " error") : ""); }
         return fd;
     }
+    if ((flags & 3) == O_RDONLY && strstr(real, "/cache/")) {
+        struct stat cst;
+        if (stat(real, &cst) == 0 && S_ISREG(cst.st_mode) && cst.st_size < 8) {
+            tl_log_line("file: removing corrupt 0-byte/truncated cache file %s", real);
+            unlink(real);
+            tl_set_guest_errno(ENOENT);
+            return -1;
+        }
+    }
     TL_ERRNO_BEGIN();
     int fd = tl_atomic_open(real, oflags_to_darwin(flags), mode);
     if (fd == -2) fd = open(real, oflags_to_darwin(flags), mode);
@@ -805,7 +814,17 @@ static void ftrace(const char *what, const char *path, int r, int e)
 }
 static int b_access(const char *p, int m) { char b[1024]; jar_entry jar; if (jar_lookup(p, &jar)) { if (!jar.found) { tl_set_guest_errno(2); return -1; } if (m & 2) { tl_set_guest_errno(13); return -1; } return 0; } if (vfile_find(p)) { if (m & 2) { tl_set_guest_errno(13); return -1; } return 0; }
     /* the made-up /proc files exist, as b_stat says (Mono's runtime exits with "Mono requires /proc to be mounted" without /proc/self/maps) */
-    if (p && (!strncmp(p, "/proc/", 6) || !strncmp(p, "/sys/", 5))) { static __thread char c[65536]; if (strstr(p, "/auxv") || synth_content(p, c, sizeof(c))) { if (m & 2) { tl_set_guest_errno(13); return -1; } return 0; } } TL_ERRNO_BEGIN(); int r = access(tl_path_resolve(p, b, sizeof(b)), m); int e = errno; TL_ERRNO_END(); ftrace("access", p, r, e); return r; }
+    if (p && (!strncmp(p, "/proc/", 6) || !strncmp(p, "/sys/", 5))) { static __thread char c[65536]; if (strstr(p, "/auxv") || synth_content(p, c, sizeof(c))) { if (m & 2) { tl_set_guest_errno(13); return -1; } return 0; } }
+    const char *resolved = tl_path_resolve(p, b, sizeof(b));
+    if ((m & 2) == 0 && strstr(resolved, "/cache/")) {
+        struct stat cst;
+        if (stat(resolved, &cst) == 0 && S_ISREG(cst.st_mode) && cst.st_size < 8) {
+            unlink(resolved);
+            tl_set_guest_errno(ENOENT);
+            return -1;
+        }
+    }
+    TL_ERRNO_BEGIN(); int r = access(resolved, m); int e = errno; TL_ERRNO_END(); ftrace("access", p, r, e); return r; }
 static int b_chmod(const char *p, unsigned m) { char b[1024]; TL_ERRNO_BEGIN(); int r = chmod(tl_path_resolve(p, b, sizeof(b)), (mode_t)m); TL_ERRNO_END(); return r; }
 static int b_fchmod(int fd, unsigned m) { TL_ERRNO_BEGIN(); int r = fchmod(fd, (mode_t)m); TL_ERRNO_END(); return r; }
 static int b_link(const char *a, const char *b2) { char x[1024], y[1024]; TL_ERRNO_BEGIN(); int r = link(tl_path_resolve(a, x, sizeof(x)), tl_path_resolve(b2, y, sizeof(y))); TL_ERRNO_END(); return r; }
@@ -887,10 +906,19 @@ static int b_stat(const char *p, guest_stat *g)
         if (vr == 0) { fill_stat(g, &s); g->st_size = (int64_t)vf->size; g->st_mode = S_IFREG | 0444; }
         return vr;
     }
-    TL_ERRNO_BEGIN(); int r = stat(tl_path_resolve(p, b, sizeof(b)), &s); int e = errno; TL_ERRNO_END();
+    const char *resolved = tl_path_resolve(p, b, sizeof(b));
+    TL_ERRNO_BEGIN(); int r = stat(resolved, &s); int e = errno; TL_ERRNO_END();
     ftrace("stat", p, r, e);
     if (r != 0 && e == ENOENT) tl_note_missing_file(p);
-    if (r == 0) fill_stat(g, &s);
+    if (r == 0) {
+        if (s.st_size < 8 && S_ISREG(s.st_mode) && strstr(resolved, "/cache/")) {
+            tl_log_line("file: stat removing corrupt cache file %s", resolved);
+            unlink(resolved);
+            tl_set_guest_errno(ENOENT);
+            return -1;
+        }
+        fill_stat(g, &s);
+    }
     return r;
 }
 static int b_lstat(const char *p, guest_stat *g)
@@ -915,7 +943,14 @@ static int b_fstatat(int dirfd, const char *p, guest_stat *g, int flags)
     struct stat s;
     fill_lib_standin_at(dirfd, p);     /* .NET for Android sizes its assembly store this way before mapping it */
     TL_ERRNO_BEGIN(); int r = fstatat(dirfd, p, &s, (flags & 0x100) ? AT_SYMLINK_NOFOLLOW : 0); TL_ERRNO_END();
-    if (r == 0) fill_stat(g, &s);
+    if (r == 0) {
+        if (s.st_size < 8 && S_ISREG(s.st_mode) && p && strstr(p, "/cache/")) {
+            unlink(p);
+            tl_set_guest_errno(ENOENT);
+            return -1;
+        }
+        fill_stat(g, &s);
+    }
     return r;
 }
 static int b_fstat(int fd, guest_stat *g)

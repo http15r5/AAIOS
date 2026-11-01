@@ -79,7 +79,13 @@ struct AppDiagnosis: Identifiable, Equatable {
 
     /// The reason a run stopped, from its log; nil when nothing in it explains the end (the app closed the normal way).
     static func fromLog(_ text: String) -> AppDiagnosis? {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        let allLines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        let lines: [String]
+        if let endPrev = allLines.lastIndex(where: { $0.contains("---- end of the previous run ----") }) {
+            lines = Array(allLines.suffix(from: endPrev + 1))
+        } else {
+            lines = allLines.filter { !$0.contains("[prev]") }
+        }
 
         // No executable memory: on iOS with TXM only a debugger can grant it, and without it the loader cannot load Android's own
         // libraries, so everything after (java.lang.System failing to initialise, missing natives) follows from this

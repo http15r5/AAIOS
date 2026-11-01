@@ -486,6 +486,13 @@ static void MA_getImageData(tl_jcall *c)
     const char *p = str ? tl_jni_string(str) : NULL;
     CGImageRef img = NULL;
     if (p && p[0]) {
+        if (strstr(p, "/cache/") && access(p, F_OK) == 0) {
+            struct stat cst;
+            if (stat(p, &cst) == 0 && S_ISREG(cst.st_mode) && cst.st_size < 8) {
+                tl_log_line("minecraft: unlinking corrupt 0-byte font/image cache %s", p);
+                unlink(p);
+            }
+        }
         CFStringRef cf = CFStringCreateWithCString(NULL, p, kCFStringEncodingUTF8);
         if (cf) {
             CFURLRef url = CFURLCreateWithFileSystemPath(NULL, cf, kCFURLPOSIXPathStyle, false);
