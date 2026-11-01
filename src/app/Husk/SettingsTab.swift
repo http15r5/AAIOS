@@ -637,98 +637,88 @@ struct JITSettings: View {
         }
     }
 
-    var body: some View {
-        HuskForm {
-            Section {
-                JITCard()
+    private var methodSection: some View {
+        Section {
+            Picker("Method", selection: $jit.method) {
+                ForEach(JITMethod.allCases) { Text($0.title).tag($0) }
             }
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
+            DetailRow(label: "StikDebug",
+                      value: JITBootstrap.isStikDebugInstalled ? "installed" : "not found", mono: false)
+            DetailRow(label: "TrollStore",
+                      value: JITBootstrap.isTrollStoreInstalled ? "installed" : "not found", mono: false)
+            DetailRow(label: "Installed with TrollStore",
+                      value: JITBootstrap.isInstalledWithTrollStore ? "yes" : "no", mono: false)
+            DetailRow(label: "Jailbreak",
+                      value: JITBootstrap.debuggedAtLaunch ? "JIT allowed for apps"
+                           : JITBootstrap.isJailbroken ? "found" : "not found", mono: false)
+            DetailRow(label: "Built-in pairing", value: pairingLabel, mono: false)
+            Button {
+                jit.showSetup = true
+            } label: {
+                Label("Set up JIT", systemImage: "wand.and.stars")
+            }
+        } header: {
+            Text("Other Ways to Turn On JIT")
+        } footer: {
+            if jit.method == .automatic {
+                Text("\(jit.automaticDescription) Built-in StikJIT needs iOS 26, LocalDevVPN, and a pairing file, which Husk can make itself on iOS 27.")
+            } else if let reason = HuskBuiltInJIT.unavailableReason {
+                Text(reason)
+            } else {
+                Text("Built-in StikJIT needs LocalDevVPN and a pairing file, which Husk can make itself on iOS 27.")
+            }
+        }
+    }
 
-            Section {
-                Picker("Method", selection: $jit.method) {
-                    ForEach(JITMethod.allCases) { Text($0.title).tag($0) }
-                }
-                DetailRow(label: "StikDebug",
-                          value: JITBootstrap.isStikDebugInstalled ? "installed" : "not found", mono: false)
-                DetailRow(label: "TrollStore",
-                          value: JITBootstrap.isTrollStoreInstalled ? "installed" : "not found", mono: false)
-                DetailRow(label: "Installed with TrollStore",
-                          value: JITBootstrap.isInstalledWithTrollStore ? "yes" : "no", mono: false)
-                DetailRow(label: "Jailbreak",
-                          value: JITBootstrap.debuggedAtLaunch ? "JIT allowed for apps"
-                               : JITBootstrap.isJailbroken ? "found" : "not found", mono: false)
-                DetailRow(label: "Built-in pairing", value: pairingLabel, mono: false)
+    private var statusSection: some View {
+        Section {
+            DetailRow(label: "Debugger",
+                      value: JITBootstrap.isDebuggerAttached ? "attached" : "not attached",
+                      mono: false)
+            DetailRow(label: "Executable memory",
+                      value: JITBootstrap.isLive ? "granted" : "not claimed", mono: false)
+            DetailRow(label: "Trap servicer",
+                      value: husk_ios_jit_self_route() != nil ? "not needed"
+                           : JITBootstrap.prewarmed ? "answering" : "not answering",
+                      mono: false)
+            if let route = husk_ios_jit_self_route() {
+                DetailRow(label: "Made by Husk",
+                          value: String(cString: route) == "MAP_JIT" ? "MAP_JIT (dynamic-codesigning)" : "plain memory (debugged or jailbroken)",
+                          mono: false)
+            }
+            DetailRow(label: "MAP_JIT",
+                      value: JITBootstrap.deviceEnforcesTXM ? "not used (TXM)"
+                           : JITBootstrap.mapJITResult.map { $0 ? "executes" : "refused" }
+                             ?? "not tested",
+                      mono: false)
+            DetailRow(label: "Debugger after setup",
+                      value: JITBootstrap.detached ? "detached" : "attached",
+                      mono: false)
+            if let why = JITBootstrap.lastFailure {
+                Text(why).font(.caption).foregroundStyle(.orange)
+            }
+            if !JITBootstrap.ready {
                 Button {
-                    jit.showSetup = true
+                    jit.enable()
                 } label: {
-                    Label("Set up JIT", systemImage: "wand.and.stars")
+                    Label("Enable JIT with \(jit.resolvedMethod.title)", systemImage: "bolt.fill")
                 }
-            } header: {
-                Text("Other Ways to Turn On JIT")
-            } footer: {
-                Text(jit.method == .automatic
-                     ? jit.automaticDescription + " Built-in StikJIT needs iOS 26, LocalDevVPN, and a "
-                       + "pairing file, which Husk can make itself on iOS 27."
-                     : HuskBuiltInJIT.unavailableReason ?? "Built-in StikJIT needs LocalDevVPN and a pairing "
-                       + "file, which Husk can make itself on iOS 27.")
+                .disabled(jit.busy)
+                Button {
+                    _ = JITBootstrap.requestTrollStoreAttach()
+                } label: {
+                    Label("Enable JIT with TrollStore", systemImage: "sparkles")
+                }
             }
+        } header: {
+            Text("JIT")
+        } footer: {
+            Text("Husk needs memory it can write and then execute, which on iOS takes an attached debugger. There are two ways to get it: a debugger that services trap requests, or a MAP_JIT mapping, which the kernel allows any debugged process. Either one is enough — which is available depends on the device and the iOS version, so Husk tests both rather than assuming.")
+        }
+    }
 
-            Section {
-                DetailRow(label: "Debugger",
-                          value: JITBootstrap.isDebuggerAttached ? "attached" : "not attached",
-                          mono: false)
-                DetailRow(label: "Executable memory",
-                          value: JITBootstrap.isLive ? "granted" : "not claimed", mono: false)
-                // The two routes, named separately. Either one is enough, and
-                // when someone reports "JIT does not work" these two rows are
-                // the whole diagnosis.
-                DetailRow(label: "Trap servicer",
-                          value: husk_ios_jit_self_route() != nil ? "not needed"
-                               : JITBootstrap.prewarmed ? "answering" : "not answering",
-                          mono: false)
-                if let route = husk_ios_jit_self_route() {
-                    DetailRow(label: "Made by Husk",
-                              value: String(cString: route) == "MAP_JIT" ? "MAP_JIT (dynamic-codesigning)" : "plain memory (debugged or jailbroken)",
-                              mono: false)
-                }
-                // Cached answer only: running the probe from a view body
-                // could freeze the app (see JITBootstrap.mapJITWorks).
-                DetailRow(label: "MAP_JIT",
-                          value: JITBootstrap.deviceEnforcesTXM ? "not used (TXM)"
-                               : JITBootstrap.mapJITResult.map { $0 ? "executes" : "refused" }
-                                 ?? "not tested",
-                          mono: false)
-                DetailRow(label: "Debugger after setup",
-                          value: JITBootstrap.detached ? "detached" : "attached",
-                          mono: false)
-                if let why = JITBootstrap.lastFailure {
-                    Text(why).font(.caption).foregroundStyle(.orange)
-                }
-                if !JITBootstrap.ready {
-                    Button {
-                        jit.enable()
-                    } label: {
-                        Label("Enable JIT with \(jit.resolvedMethod.title)", systemImage: "bolt.fill")
-                    }
-                    .disabled(jit.busy)
-                    Button {
-                        _ = JITBootstrap.requestTrollStoreAttach()
-                    } label: {
-                        Label("Enable JIT with TrollStore", systemImage: "sparkles")
-                    }
-                }
-            } header: {
-                Text("JIT")
-            } footer: {
-                Text("Husk needs memory it can write and then execute, which on iOS "
-                   + "takes an attached debugger. There are two ways to get it: a "
-                   + "debugger that services trap requests, or a MAP_JIT mapping, "
-                   + "which the kernel allows any debugged process. Either one is "
-                   + "enough — which is available depends on the device and the iOS "
-                   + "version, so Husk tests both rather than assuming.")
-            }
-
+    private var launchSection: some View {
+        Group {
             if JITBootstrap.isInstalledWithTrollStore {
                 Section {
                     Toggle("Turn On JIT with TrollStore at Launch", isOn: $trollStoreJIT)
@@ -761,21 +751,32 @@ struct JITSettings: View {
                 Toggle("Keep debugger attached", isOn: $keepAttached)
                     .onChange(of: keepAttached) { v in JITBootstrap.keepDebuggerAttached = v }
             } footer: {
-                Text("Off by default. Husk detaches StikDebug as soon as the "
-                   + "JIT region is held, because a debugger that iOS has suspended "
-                   + "stops the whole app the next time it is needed. Turn this on "
-                   + "only to collect StikDebug's own logs.")
+                Text("Off by default. Husk detaches StikDebug as soon as the JIT region is held, because a debugger that iOS has suspended stops the whole app the next time it is needed. Turn this on only to collect StikDebug's own logs.")
             }
+        }
+    }
 
+    private var sideloadSection: some View {
+        Section {
+            Text("APKs install from the Library's + button or from the Files tab. Split sets — a base APK plus its config pieces — must be picked together; installing the base alone fails on missing native libraries.")
+                .font(.footnote).foregroundStyle(.secondary)
+        } header: {
+            Text("Sideloading")
+        }
+    }
+
+    var body: some View {
+        HuskForm {
             Section {
-                Text("APKs install from the Library's + button or from the Files tab. "
-                   + "Split sets — a base APK plus its config pieces — must be picked "
-                   + "together; installing the base alone fails on missing native "
-                   + "libraries.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: {
-                Text("Sideloading")
+                JITCard()
             }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+
+            methodSection
+            statusSection
+            launchSection
+            sideloadSection
         }
         .huskForm()
         .navigationTitle("JIT & sideload")
