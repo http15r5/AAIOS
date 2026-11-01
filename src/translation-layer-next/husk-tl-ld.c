@@ -892,6 +892,11 @@ static void *make_stub(const char *name)
     return rx;
 }
 
+void *tl_ld_make_stub(const char *name)
+{
+    return make_stub(name ? name : "adaptive_dummy");
+}
+
 /* ------------------------------------------------------- raw system calls */
 
 /*
