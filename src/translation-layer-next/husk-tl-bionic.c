@@ -424,7 +424,8 @@ static void guest_abort(const char *why)
     tl_log_line("bionic: guest abort (%s) at %s", why, where);
     char tn[40] = "";
     pthread_getname_np(pthread_self(), tn, sizeof(tn));
-    if (!strncmp(tn, "Streaming Pool", 14) || strstr(tn, "Pool") || strstr(tn, "Worker") || strstr(tn, "Async")) {
+    if (!strncmp(tn, "Streaming Pool", 14) || strstr(tn, "Pool") || strstr(tn, "Worker") || strstr(tn, "Async") ||
+        strstr(tn, "Firebase") || strstr(tn, "tp-io") || strstr(tn, "WM.task") || strstr(tn, "OkHttp") || strstr(tn, "CrAsyncTask")) {
         tl_log_line("bionic: guest abort on worker thread '%s' - safely terminating worker thread", tn);
         pthread_exit(NULL);
     }
@@ -438,7 +439,8 @@ static void bionic_abort(void)
     tl_log_line("bionic: abort() called from %s", where);
     char tn[40] = "";
     pthread_getname_np(pthread_self(), tn, sizeof(tn));
-    if (!strncmp(tn, "Streaming Pool", 14) || strstr(tn, "Pool") || strstr(tn, "Worker") || strstr(tn, "Async")) {
+    if (!strncmp(tn, "Streaming Pool", 14) || strstr(tn, "Pool") || strstr(tn, "Worker") || strstr(tn, "Async") ||
+        strstr(tn, "Firebase") || strstr(tn, "tp-io") || strstr(tn, "WM.task") || strstr(tn, "OkHttp") || strstr(tn, "CrAsyncTask")) {
         tl_log_line("bionic: abort() on worker thread '%s' - safely terminating worker thread", tn);
         pthread_exit(NULL);
     }
@@ -467,7 +469,8 @@ static void bionic___assert2(const char *file, int line, const char *func, const
     tl_log_line("bionic: assertion failed: %s:%d: %s: %s (from %s)", file, line, func ? func : "?", expr, where);
     char tn[40] = "";
     pthread_getname_np(pthread_self(), tn, sizeof(tn));
-    if (!strncmp(tn, "Streaming Pool", 14) || strstr(tn, "Pool") || strstr(tn, "Worker") || strstr(tn, "Async")) {
+    if (!strncmp(tn, "Streaming Pool", 14) || strstr(tn, "Pool") || strstr(tn, "Worker") || strstr(tn, "Async") ||
+        strstr(tn, "Firebase") || strstr(tn, "tp-io") || strstr(tn, "WM.task") || strstr(tn, "OkHttp") || strstr(tn, "CrAsyncTask")) {
         tl_log_line("bionic: assertion failed on worker thread '%s' - safely terminating worker thread", tn);
         pthread_exit(NULL);
     }

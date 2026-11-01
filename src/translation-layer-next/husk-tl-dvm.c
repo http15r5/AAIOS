@@ -1003,6 +1003,31 @@ static bool watch_hit(const char *w, const dvm_method *m)
     return false;
 }
 
+static bool dvm_call_inner(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret);
+
+static void __attribute__((noinline)) dvm_log_call(dvm_method *m, jobj *self, const jvalue *params)
+{
+    char pb[300]; int po = 0, pn = 0;
+    for (const char *q = (m->shorty ? m->shorty : "") + 1; *q && po < 280; q++, pn++) po += snprintf(pb + po, sizeof(pb) - po, " %c:%lld", *q, params ? (long long)params[pn].j : 0);
+    static int depth; if (!depth) depth = getenv("TL_DVM_CALLS_DEPTH") ? atoi(getenv("TL_DVM_CALLS_DEPTH")) : 4;
+    char cb[4000]; int co = 0;
+    for (int up = 2; up <= depth + 1 && t_depth - up >= 0 && t_depth - up < 8192 && co < 3900; up++) {
+        dvm_method *cm = t_frames[t_depth - up];
+        co += snprintf(cb + co, sizeof(cb) - co, " <- %s.%s@%u", cm ? cm->cls->name : "?", cm ? cm->name : "?", t_pcs[t_depth - up]);
+    }
+    cb[co] = 0;
+    tl_log_line("dvm: call %s.%s%s self %p args%s%s", m->cls->name, m->name, m->sig, (void *)self, pb, cb);
+    int np = 0; const char *sh = m->shorty ? m->shorty : "";
+    for (const char *q = sh + 1; *q; q++, np++) {
+        if (*q != 'L' || !params || !params[np].l) continue;
+        jobj *saved = tl_jni_pending_object(); tl_jni_clear();
+        dvm_method *ts = dvm_find_virtual(dvm_object_class(params[np].l), "toString", "()Ljava/lang/String;");
+        jvalue sv; sv.l = NULL;
+        if (ts && dvm_call_inner(ts, params[np].l, NULL, &sv)) tl_log_line("dvm:   arg %d = %.600s", np, tl_jni_string(sv.l) ? tl_jni_string(sv.l) : "null");
+        tl_jni_clear(); if (saved) tl_jni_set_pending(saved);
+    }
+}
+
 bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
 {
     if (!m) { if (ret) ret->j = 0; return true; }
@@ -1016,39 +1041,25 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
         t_stack_low = (top > sz) ? (top - sz) : 0;
     }
     uintptr_t sp = (uintptr_t)__builtin_frame_address(0);
-    bool phys_overflow = (t_depth > 120 && t_stack_low && sp < t_stack_low + (t_overflowing ? 8192 : 16384));
-    if (t_depth > (t_overflowing ? 600 : 500) || phys_overflow) {
+    bool phys_overflow = (t_stack_low && sp < t_stack_low + (t_overflowing ? 16384 : 40960));
+    if (t_depth > (t_overflowing ? 800 : 600) || phys_overflow) {
         t_depth--;
         if (t_overflowing) return false;
         t_overflowing = true;
-        tl_log_line("dvm: stack overflow prevented at depth %d calling %s.%s%s", t_depth, m->cls ? m->cls->name : "?", m->name ? m->name : "?", m->sig ? m->sig : "?");
+        tl_log_line("dvm: stack overflow prevented at depth %d calling %s.%s%s (sp %p, limit %p)",
+                    t_depth, m->cls ? m->cls->name : "?", m->name ? m->name : "?", m->sig ? m->sig : "?",
+                    (void *)sp, (void *)t_stack_low);
         bool r = dvm_throw("java/lang/StackOverflowError", "stack size %d frames", t_depth);
         t_overflowing = false;
         return r;
     }
     static const char *watch;
     if (!watch) watch = getenv("TL_DVM_CALLS") ? getenv("TL_DVM_CALLS") : "";
-    if (watch[0] && watch_hit(watch, m)) {
-        { char pb[300]; int po = 0, pn = 0;
-          for (const char *q = (m->shorty ? m->shorty : "") + 1; *q && po < 280; q++, pn++) po += snprintf(pb + po, sizeof(pb) - po, " %c:%lld", *q, params ? (long long)params[pn].j : 0);
-          static int depth; if (!depth) depth = getenv("TL_DVM_CALLS_DEPTH") ? atoi(getenv("TL_DVM_CALLS_DEPTH")) : 4;
-          char cb[4000]; int co = 0;
-          for (int up = 2; up <= depth + 1 && t_depth - up >= 0 && t_depth - up < 8192 && co < 3900; up++) {
-              dvm_method *cm = t_frames[t_depth - up];
-              co += snprintf(cb + co, sizeof(cb) - co, " <- %s.%s@%u", cm ? cm->cls->name : "?", cm ? cm->name : "?", t_pcs[t_depth - up]);
-          }
-          cb[co] = 0;
-          tl_log_line("dvm: call %s.%s%s self %p args%s%s", m->cls->name, m->name, m->sig, (void *)self, pb, cb); }
-        int np = 0; const char *sh = m->shorty ? m->shorty : "";
-        for (const char *q = sh + 1; *q; q++, np++) {
-            if (*q != 'L' || !params || !params[np].l) continue;
-            jobj *saved = tl_jni_pending_object(); tl_jni_clear();
-            dvm_method *ts = dvm_find_virtual(dvm_object_class(params[np].l), "toString", "()Ljava/lang/String;");
-            jvalue sv; sv.l = NULL;
-            if (ts && dvm_call_inner(ts, params[np].l, NULL, &sv)) tl_log_line("dvm:   arg %d = %.600s", np, tl_jni_string(sv.l) ? tl_jni_string(sv.l) : "null");
-            tl_jni_clear(); if (saved) tl_jni_set_pending(saved);
-        }
-    }
+    if (watch[0] && watch_hit(watch, m)) dvm_log_call(m, self, params);
+    bool ok = dvm_call_inner(m, self, params, ret);
+    t_depth--;
+    return ok;
+}
     bool ok = dvm_call_inner(m, self, params, ret);
     t_depth--;
     return ok;
@@ -1261,6 +1272,18 @@ typedef struct mref {
     bool missing;                   /* or its class exists nowhere (class_missing) */
 } mref;
 
+static void __attribute__((noinline)) resolve_mref_sig(dvm_dex *d, uint16_t proto_idx, mref *r)
+{
+    char *sg = malloc(8192);
+    char sh[300];
+    if (sg) {
+        proto_sig(d, proto_idx, sg, 8192, sh, sizeof(sh), &r->nparams);
+        r->sig = strdup(sg);
+        r->shorty = strdup(sh);
+        free(sg);
+    }
+}
+
 static mref *resolve_mref(dvm_dex *d, uint32_t idx, bool is_static)
 {
     static _Thread_local mref *last;
@@ -1271,7 +1294,7 @@ static mref *resolve_mref(dvm_dex *d, uint32_t idx, bool is_static)
     const uint8_t *mi = d->b + d->meth_off + 8 * idx;
     r->cls = resolve_type(d, rd16(mi));
     r->name = dex_str(d, rd32(mi + 4));
-    { char sg[8192], sh[300]; proto_sig(d, rd16(mi + 2), sg, sizeof(sg), sh, sizeof(sh), &r->nparams); r->sig = strdup(sg); r->shorty = strdup(sh); }
+    resolve_mref_sig(d, rd16(mi + 2), r);
     dvm_class *c = dvm_class_of(r->cls);
     if (c) r->dm = dvm_find_method(c, r->name, r->sig, is_static);
     r->missing = !c && class_missing(r->cls);
@@ -1688,6 +1711,36 @@ static bool varhandle(const char *mode, const char *shorty, jobj *vh, const uint
 #define THROW_IF(c) do { if (c) goto exception; } while (0)
 #define NEXT(n) do { pc += (n); goto dispatch; } while (0)
 
+static bool __attribute__((noinline)) handle_invoke_polymorphic(dvm_dex *dex, dvm_method *m, uint16_t w, const uint16_t *insns, uint32_t pc, uint64_t *regs, jvalue *result)
+{
+    uint8_t op = w & 0xFF;
+    bool range = op == 0xfb;
+    int count = range ? AA : B4;
+    uint16_t list = FETCH(2);
+    uint64_t *vals = malloc(256 * sizeof(uint64_t));
+    if (!vals) return dvm_throw("java/lang/OutOfMemoryError", "handle_invoke_polymorphic");
+    for (int i = 0; i < count && i < 256; i++) vals[i] = regs[range ? list + i : (i < 4 ? (list >> (4 * i)) & 0xF : A4)];
+    const uint8_t *mi = dex->b + dex->meth_off + 8 * FETCH(1);
+    const char *mname = dex_str(dex, rd32(mi + 4));
+    tl_jclass *owner = resolve_type(dex, rd16(mi));
+    char *csig = malloc(8192);
+    char cshorty[300]; int np = 0;
+    if (!csig) { free(vals); return dvm_throw("java/lang/OutOfMemoryError", "handle_invoke_polymorphic"); }
+    proto_sig(dex, FETCH(3), csig, 8192, cshorty, sizeof(cshorty), &np);
+    free(csig);
+    jobj *recv = (jobj *)(uintptr_t)vals[0];
+    if (!recv) { free(vals); return dvm_throw("java/lang/NullPointerException", "invoke-polymorphic on null"); }
+    uint64_t args[64]; int k = 1;
+    for (int i = 0; i < np && i < 63; i++) { args[i] = vals[k]; k += (cshorty[1 + i] == 'J' || cshorty[1 + i] == 'D') ? 2 : 1; }
+    free(vals);
+    result->j = 0;
+    if (!strcmp(owner->name, "java/lang/invoke/VarHandle")) {
+        return varhandle(mname, cshorty, recv, args, result);
+    } else {
+        return dvm_throw("java/lang/UnsupportedOperationException", "MethodHandle.%s is not supported yet (in %s.%s)", mname, m->cls->name, m->name);
+    }
+}
+
 static bool interpret(dvm_method *m, uint64_t *regs, jvalue *ret)
 {
     const uint16_t *insns = m->insns;
@@ -2072,28 +2125,7 @@ dispatch:;
         }
         if (op == 0xfe || op == 0xff) { dvm_throw("java/lang/UnsupportedOperationException", "const-method-handle/type"); goto exception; }
         if (op == 0xfa || op == 0xfb) {                            /* invoke-polymorphic(/range) */
-            bool range = op == 0xfb;
-            int count = range ? AA : B4;
-            uint16_t list = FETCH(2);
-            uint64_t vals[256];
-            for (int i = 0; i < count && i < 256; i++) vals[i] = regs[range ? list + i : (i < 4 ? (list >> (4 * i)) & 0xF : A4)];
-            const uint8_t *mi = dex->b + dex->meth_off + 8 * FETCH(1);
-            const char *mname = dex_str(dex, rd32(mi + 4));
-            tl_jclass *owner = resolve_type(dex, rd16(mi));
-            char csig[8192], cshorty[300]; int np;
-            proto_sig(dex, FETCH(3), csig, sizeof(csig), cshorty, sizeof(cshorty), &np);
-            jobj *recv = (jobj *)(uintptr_t)vals[0];
-            if (!recv) { dvm_throw("java/lang/NullPointerException", "invoke-polymorphic on null"); goto exception; }
-            /* wide arguments take two registers; pack one value per parameter */
-            uint64_t args[64]; int k = 1;
-            for (int i = 0; i < np && i < 63; i++) { args[i] = vals[k]; k += (cshorty[1 + i] == 'J' || cshorty[1 + i] == 'D') ? 2 : 1; }
-            result.j = 0;
-            if (!strcmp(owner->name, "java/lang/invoke/VarHandle")) {
-                if (!varhandle(mname, cshorty, recv, args, &result)) goto exception;
-            } else {
-                dvm_throw("java/lang/UnsupportedOperationException", "MethodHandle.%s is not supported yet (in %s.%s)", mname, m->cls->name, m->name);
-                goto exception;
-            }
+            if (!handle_invoke_polymorphic(dex, m, w, insns, pc, regs, &result)) goto exception;
             NEXT(4);
         }
         if (op >= 0xfc && op <= 0xfd) { dvm_throw("java/lang/UnsupportedOperationException", "invoke-custom in %s.%s is not supported yet", m->cls->name, m->name); goto exception; }

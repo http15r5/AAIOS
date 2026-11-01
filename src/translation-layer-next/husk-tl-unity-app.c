@@ -109,8 +109,13 @@ static void on_fatal(int sig, siginfo_t *info, void *uctx)
     ucontext_t *uc = uctx;
     char tn_fatal[40] = "";
     pthread_getname_np(pthread_self(), tn_fatal, sizeof(tn_fatal));
-    if (sig == SIGABRT && (!strncmp(tn_fatal, "Streaming Pool", 14) || strstr(tn_fatal, "Pool") || strstr(tn_fatal, "Worker") || strstr(tn_fatal, "Async"))) {
-        tl_log_line("ld: caught worker thread SIGABRT on '%s', terminating worker safely", tn_fatal);
+    if ((sig == SIGABRT || sig == SIGBUS || sig == SIGSEGV) &&
+        (!strncmp(tn_fatal, "Streaming Pool", 14) || strstr(tn_fatal, "Pool") ||
+         strstr(tn_fatal, "Worker") || strstr(tn_fatal, "Async") ||
+         strstr(tn_fatal, "Firebase") || strstr(tn_fatal, "tp-io") ||
+         strstr(tn_fatal, "WM.task") || strstr(tn_fatal, "OkHttp") ||
+         strstr(tn_fatal, "CrAsyncTask"))) {
+        tl_log_line("ld: caught worker thread signal %d on '%s', safely terminating worker thread", sig, tn_fatal);
         pthread_exit(NULL);
         return;
     }
