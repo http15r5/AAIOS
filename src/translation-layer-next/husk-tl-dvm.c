@@ -1060,10 +1060,6 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
     t_depth--;
     return ok;
 }
-    bool ok = dvm_call_inner(m, self, params, ret);
-    t_depth--;
-    return ok;
-}
 
 static bool dvm_call_inner(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
 {
