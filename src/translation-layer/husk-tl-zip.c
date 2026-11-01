@@ -125,7 +125,10 @@ bool tl_zip_open(tl_zip *z, const char *path, char *err, size_t errlen)
         return false;
     }
     z->size = (size_t)st.st_size;
-    void *map = mmap(NULL, z->size, PROT_READ, MAP_PRIVATE, z->fd, 0);
+    void *map = mmap(NULL, z->size, PROT_READ, MAP_SHARED, z->fd, 0);
+    if (map == MAP_FAILED) {
+        map = mmap(NULL, z->size, PROT_READ, MAP_PRIVATE, z->fd, 0);
+    }
     if (map == MAP_FAILED) {
         fail(err, errlen, "cannot map: %s", strerror(errno));
         z->size = 0;
