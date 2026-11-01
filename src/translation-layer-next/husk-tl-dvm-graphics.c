@@ -228,17 +228,27 @@ static CTFontRef font_with_cascade(CTFontRef f)
         CFRelease(sys);
     }
 
-    /* Also explicitly append AppleColorEmoji, Apple Symbols, Symbol, SF Pro, Geneva, Menlo */
+    CGFloat fsize = CTFontGetSize(f);
+    if (fsize <= 0.0) fsize = 12.0;
+
+    /* Also explicitly append AppleColorEmoji, Apple Symbols, Symbol, SF Pro, Geneva, Menlo, etc. */
     static const CFStringRef fallbackNames[] = {
         CFSTR("AppleColorEmoji"),
         CFSTR(".AppleSystemUIFont"),
         CFSTR("Apple Symbols"),
         CFSTR("Symbol"),
+        CFSTR("Zapf Dingbats"),
+        CFSTR("Hiragino Sans"),
+        CFSTR("PingFang SC"),
+        CFSTR("Apple SD Gothic Neo"),
+        CFSTR("Geeza Pro"),
+        CFSTR("Thonburi"),
+        CFSTR("STIXGeneral"),
         CFSTR("Geneva"),
         CFSTR("Menlo")
     };
     for (size_t i = 0; i < sizeof(fallbackNames) / sizeof(fallbackNames[0]); i++) {
-        CTFontDescriptorRef desc = CTFontDescriptorCreateWithNameAndSize(fallbackNames[i], 0.0);
+        CTFontDescriptorRef desc = CTFontDescriptorCreateWithNameAndSize(fallbackNames[i], fsize);
         if (desc) {
             CFArrayAppendValue(mutCascade, desc);
             CFRelease(desc);
@@ -765,14 +775,20 @@ static CTLineRef make_line(CFStringRef str, const int32_t *p, gface *g)
     }
     CTFontRef f = sized(g, pf(p, P_TEXTSIZE));
     float ls = pf(p, P_LSPACE) * pf(p, P_TEXTSIZE);
-    CFNumberRef kern = CFNumberCreate(NULL, kCFNumberFloatType, &ls);
-    const void *k[] = { kCTFontAttributeName, kCTForegroundColorFromContextAttributeName, kCTKernAttributeName };
-    const void *v[] = { f, kCFBooleanTrue, kern };
-    CFDictionaryRef attrs = CFDictionaryCreate(NULL, k, v, ls != 0 ? 3 : 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFNumberRef kern = (ls != 0.0f) ? CFNumberCreate(NULL, kCFNumberFloatType, &ls) : NULL;
+    CGColorRef col = color_of((uint32_t)p[P_COLOR], 1);
+    const void *k[3];
+    const void *v[3];
+    CFIndex nattrs = 0;
+    k[nattrs] = kCTFontAttributeName; v[nattrs] = f; nattrs++;
+    if (col) { k[nattrs] = kCTForegroundColorAttributeName; v[nattrs] = col; nattrs++; }
+    if (kern) { k[nattrs] = kCTKernAttributeName; v[nattrs] = kern; nattrs++; }
+    CFDictionaryRef attrs = CFDictionaryCreate(NULL, k, v, nattrs, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     CFAttributedStringRef as = safe_str ? CFAttributedStringCreate(NULL, safe_str, attrs) : NULL;
     CTLineRef line = as ? CTLineCreateWithAttributedString(as) : NULL;
     if (as) CFRelease(as);
     if (attrs) CFRelease(attrs);
+    if (col) CFRelease(col);
     if (kern) CFRelease(kern);
     if (f) CFRelease(f);
     if (own_str && safe_str) CFRelease(safe_str);

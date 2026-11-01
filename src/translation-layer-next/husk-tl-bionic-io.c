@@ -733,7 +733,20 @@ static int b_dup(int fd) { TL_ERRNO_BEGIN(); int r = dup(fd); TL_ERRNO_END(); re
  * would swallow Husk's own log. The redirect is reported done; their pipe simply stays empty. */
 static int b_dup2(int a, int b) { if (b >= 0 && b <= 2 && a != b) return b; TL_ERRNO_BEGIN(); int r = dup2(a, b); if (r >= 0 && a != b) tl_atomic_closed(b); TL_ERRNO_END(); return r; }
 static int b_pipe(int fds[2]) { TL_ERRNO_BEGIN(); int r = pipe(fds); TL_ERRNO_END(); return r; }
-static int b_fsync(int fd) { TL_ERRNO_BEGIN(); int r = fsync(fd); TL_ERRNO_END(); return r; }
+static int b_fsync(int fd)
+{
+    TL_ERRNO_BEGIN();
+    int r = fsync(fd);
+    if (r < 0 && (errno == EINVAL || errno == ENOTSUP)) {
+        struct stat st;
+        if (fstat(fd, &st) == 0 && !S_ISREG(st.st_mode)) {
+            r = 0;
+            errno = 0;
+        }
+    }
+    TL_ERRNO_END();
+    return r;
+}
 static int b_ftruncate(int fd, long n) { TL_ERRNO_BEGIN(); int r = ftruncate(fd, n); TL_ERRNO_END(); return r; }
 static int b_truncate(const char *p, long n) { char b[1024]; TL_ERRNO_BEGIN(); int r = truncate(tl_path_resolve(p, b, sizeof(b)), n); TL_ERRNO_END(); return r; }
 static int b_isatty(int fd) { int r = isatty(fd); if (!r) tl_set_guest_errno(25); return r; }
@@ -999,13 +1012,30 @@ static int b_fcntl(int fd, int cmd, long arg)
     case 2:    r = fcntl(fd, F_SETFD, (int)arg); break;
     case 3:    r = fcntl(fd, F_GETFL); if (r >= 0) r = oflags_from_darwin(r); break;
     case 4:    r = fcntl(fd, F_SETFL, oflags_to_darwin((int)arg) & ~3); break;
+    case 8:    r = fcntl(fd, F_SETOWN, (int)arg); break;
+    case 9:    r = fcntl(fd, F_GETOWN); break;
     case 1030: r = fcntl(fd, F_DUPFD_CLOEXEC, (int)arg); break;
-    case 5: case 6: case 7: {                               /* F_GETLK, F_SETLK, F_SETLKW */
+    case 1031: r = 0; break;                                /* F_SETPIPE_SZ */
+    case 1032: r = 65536; break;                            /* F_GETPIPE_SZ */
+    case 1033: case 1034: r = 0; break;                     /* F_ADD_SEALS, F_GET_SEALS */
+    case 5: case 12: case 36:                               /* F_GETLK, F_GETLK64, F_OFD_GETLK */
+    case 6: case 13: case 37:                               /* F_SETLK, F_SETLK64, F_OFD_SETLK */
+    case 7: case 14: case 38: {                             /* F_SETLKW, F_SETLKW64, F_OFD_SETLKW */
         guest_flock *g = (guest_flock *)arg;
+        if (!g) { errno = EFAULT; r = -1; break; }
         struct flock f = { .l_start = g->l_start, .l_len = g->l_len, .l_pid = g->l_pid,
                            .l_type = g->l_type == 0 ? F_RDLCK : g->l_type == 1 ? F_WRLCK : F_UNLCK, .l_whence = g->l_whence };
-        r = fcntl(fd, cmd == 5 ? F_GETLK : cmd == 6 ? F_SETLK : F_SETLKW, &f);
-        if (cmd == 5 && r == 0) { g->l_type = f.l_type == F_RDLCK ? 0 : f.l_type == F_WRLCK ? 1 : 2; g->l_pid = f.l_pid; }
+        int dcmd = (cmd == 5 || cmd == 12 || cmd == 36) ? F_GETLK : (cmd == 6 || cmd == 13 || cmd == 37) ? F_SETLK : F_SETLKW;
+        r = fcntl(fd, dcmd, &f);
+        if (r < 0 && (errno == ENOTSUP || errno == ENOTTY)) {
+            /* Filesystems/mounts without POSIX locks: return 0 so SQLite doesn't abort */
+            r = 0;
+            errno = 0;
+        }
+        if ((cmd == 5 || cmd == 12 || cmd == 36) && r == 0) {
+            g->l_type = f.l_type == F_RDLCK ? 0 : f.l_type == F_WRLCK ? 1 : 2;
+            g->l_pid = f.l_pid;
+        }
         break;
     }
     default: errno = EINVAL; r = -1; break;

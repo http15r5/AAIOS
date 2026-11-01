@@ -199,7 +199,13 @@ public class Paint {
 
     public float measureText(String s) { return s == null ? 0 : husk.Gfx.txMeasure(s, 0, s.length(), mP, huskFace()); }
     public float measureText(String s, int start, int end) { return husk.Gfx.txMeasure(s, start, end, mP, huskFace()); }
-    public float measureText(CharSequence s, int start, int end) { return measureText(s.toString(), start, end); }
+    public float measureText(CharSequence s, int start, int end) {
+        if (s instanceof android.text.Spanned) {
+            android.text.TextPaint tp = (this instanceof android.text.TextPaint) ? (android.text.TextPaint) this : new android.text.TextPaint(this);
+            return husk.TextRuns.measure(s, start, end, tp);
+        }
+        return measureText(s.toString(), start, end);
+    }
     public float measureText(char[] t, int index, int count) { return measureText(new String(t, index, count)); }
     public float getRunAdvance(CharSequence t, int start, int end, int cs, int ce, boolean rtl, int offset) { return measureText(t.toString(), start, offset); }
     public float getRunAdvance(char[] t, int start, int end, int cs, int ce, boolean rtl, int offset) { return measureText(new String(t), start, offset); }

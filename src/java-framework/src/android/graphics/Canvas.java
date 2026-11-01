@@ -202,9 +202,23 @@ public class Canvas {
         husk.Gfx.cvDrawText(mNative, s, start, end, x, y, p.mP, p.huskFace(), p.huskShader());
         touched();
     }
-    public void drawText(CharSequence s, int start, int end, float x, float y, Paint p) { drawText(s.toString(), start, end, x, y, p); }
+    public void drawText(CharSequence s, int start, int end, float x, float y, Paint p) {
+        if (s instanceof android.text.Spanned) {
+            android.text.TextPaint tp = (p instanceof android.text.TextPaint) ? (android.text.TextPaint) p : new android.text.TextPaint(p);
+            husk.TextRuns.draw(this, s, start, end, x, y, (int)(y - tp.getTextSize()), (int)(y + tp.getTextSize() * 0.3f), tp);
+        } else {
+            drawText(s.toString(), start, end, x, y, p);
+        }
+    }
     public void drawText(char[] t, int index, int count, float x, float y, Paint p) { drawText(new String(t, index, count), x, y, p); }
-    public void drawTextRun(CharSequence s, int start, int end, int cs, int ce, float x, float y, boolean rtl, Paint p) { drawText(s.toString(), start, end, x, y, p); }
+    public void drawTextRun(CharSequence s, int start, int end, int cs, int ce, float x, float y, boolean rtl, Paint p) {
+        if (s instanceof android.text.Spanned) {
+            android.text.TextPaint tp = (p instanceof android.text.TextPaint) ? (android.text.TextPaint) p : new android.text.TextPaint(p);
+            husk.TextRuns.draw(this, s, start, end, x, y, (int)(y - tp.getTextSize()), (int)(y + tp.getTextSize() * 0.3f), tp);
+        } else {
+            drawText(s.toString(), start, end, x, y, p);
+        }
+    }
     public void drawTextRun(char[] t, int index, int count, int cs, int cc, float x, float y, boolean rtl, Paint p) { drawText(t, index, count, x, y, p); }
     public void drawTextOnPath(String s, Path path, float h, float v, Paint p) { drawText(s, h, v, p); }
     public void drawTextOnPath(char[] t, int index, int count, Path path, float h, float v, Paint p) { drawText(t, index, count, h, v, p); }

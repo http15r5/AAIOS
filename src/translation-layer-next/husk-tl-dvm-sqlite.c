@@ -70,9 +70,11 @@ NAT(S_open)
         return true;
     }
     sqlite3_extended_result_codes(db, 1);
-    sqlite3_busy_timeout(db, 2500);
+    sqlite3_busy_timeout(db, 30000);
     sqlite3_create_collation(db, "LOCALIZED", SQLITE_UTF8, NULL, coll_nocase);
     sqlite3_create_collation(db, "UNICODE", SQLITE_UTF8, NULL, coll_binary);
+    sqlite3_create_collation(db, "PHONEBOOK", SQLITE_UTF8, NULL, coll_nocase);
+    sqlite3_create_collation(db, "RTRIM", SQLITE_UTF8, NULL, coll_binary);
     *ret = J((int64_t)(uintptr_t)db);
     return true;
 }

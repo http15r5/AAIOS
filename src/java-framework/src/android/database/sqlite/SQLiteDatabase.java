@@ -130,7 +130,7 @@ public final class SQLiteDatabase extends SQLiteClosable {
         acquire();
         boolean ok = false;
         try {
-            if (mTxn == null) { int rc = husk.Sqlite.exec(handle(), exclusive ? "BEGIN EXCLUSIVE;" : "BEGIN IMMEDIATE;"); if (rc != 0) throw error("BEGIN"); }
+            if (mTxn == null) { int rc = husk.Sqlite.exec(handle(), exclusive ? "BEGIN EXCLUSIVE;" : "BEGIN DEFERRED;"); if (rc != 0) throw error("BEGIN"); }
             Txn t = new Txn(); t.listener = listener; t.parent = mTxn; mTxn = t;
             if (listener != null) {
                 try { listener.onBegin(); }
