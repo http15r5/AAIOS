@@ -643,7 +643,7 @@ static void clip_image(CGContextRef c, const void *ctx)
 {
     const struct image_clip *ic = ctx;
     if (!ic || !ic->img) return;
-    if (CGAffineTransformIsInvertible(ic->t)) {
+    if (fabsf((float)(ic->t.a * ic->t.d - ic->t.b * ic->t.c)) > 1e-6f) {
         CGContextConcatCTM(c, ic->t);
         CGContextClipToMask(c, ic->r, ic->img);
         CGContextConcatCTM(c, CGAffineTransformInvert(ic->t));
