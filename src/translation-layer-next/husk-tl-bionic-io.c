@@ -1622,8 +1622,6 @@ static int b_mprotect(void *a, size_t l, int prot)
         return 0;
     }
     TL_ERRNO_BEGIN(); int r = mprotect(a, l, prot_filter(prot, "mprotect")); int e = errno; TL_ERRNO_END(); mm_trace("mprotect", a, l, prot, r ? e : 0); return r; }
-int tl_guest_madvise(void *a, size_t l, int adv);
-int tl_guest_madvise(void *a, size_t l, int adv) { return b_madvise(a, l, adv); }
 static int b_madvise(void *a, size_t l, int adv)
 {
     mm_trace("madvise", a, l, adv, 0);
@@ -1640,6 +1638,8 @@ static int b_madvise(void *a, size_t l, int adv)
     }
     return 0;                                                /* the rest are hints */
 }
+int tl_guest_madvise(void *a, size_t l, int adv);
+int tl_guest_madvise(void *a, size_t l, int adv) { return b_madvise(a, l, adv); }
 static void *b_mremap(void *old, size_t olds, size_t news, int flags, void *newaddr)
 {
     mm_trace("mremap", old, olds, (long)news, flags);
