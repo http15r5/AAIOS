@@ -1296,7 +1296,7 @@ static void mm_trace(const char *what, void *a, size_t l, long x, long y)
  * start of an 8 GiB range it believes it owns; what it then gives back -- the half that was never mapped -- is ignored.
  */
 #define PHANTOM_HALF ((size_t)4 << 30)
-static struct { uintptr_t base; size_t len, real; } g_phantom[4];
+static struct { uintptr_t base; size_t len, real; } g_phantom[16];
 static int g_nphantom;
 
 /* Reserve before JIT aliases fragment the available aligned address range.
@@ -1336,7 +1336,7 @@ static bool compressed_heap_request(size_t len)
 
 static void *phantom_reserve(size_t len)
 {
-    if (!compressed_heap_request(len) || g_nphantom >= 4) return MAP_FAILED;
+    if (!compressed_heap_request(len) || g_nphantom >= 16) return MAP_FAILED;
     pthread_mutex_lock(&g_compressed_heap_lock);
     vm_address_t address = g_compressed_heap;
     g_compressed_heap = 0; /* ownership transfers to g_phantom below */
@@ -1408,6 +1408,16 @@ static size_t phantom_clamp(uintptr_t a, size_t l)
         if (a >= b && a < end) return a >= real_end ? 0 : (a + l > real_end ? real_end - a : l);
     }
     return l;
+}
+
+static void phantom_remove(uintptr_t base, size_t len)
+{
+    for (int i = 0; i < g_nphantom; i++) {
+        if (g_phantom[i].base == base && (len == 0 || len >= g_phantom[i].real)) {
+            g_phantom[i] = g_phantom[--g_nphantom];
+            break;
+        }
+    }
 }
 
 /* Whether only the JIT region can execute here: the phone (iOS), or a Mac told to behave like one (TL_PHONE_JIT=1). */
@@ -1552,6 +1562,7 @@ static int b_munmap(void *a, size_t l)
     { int sr; if (shifted_unmap(a, &sr)) { mm_trace("munmap", a, l, sr, errno); return sr; } }
     size_t real = phantom_clamp((uintptr_t)a, l);
     if (real == 0) return 0;                                 /* the half of a phantom range that was never mapped */
+    phantom_remove((uintptr_t)a, l);
     anon_remove((uintptr_t)a, real);
     TL_ERRNO_BEGIN(); int r = munmap(a, real); TL_ERRNO_END(); mm_trace("munmap", a, real, r, errno); return r;
 }
@@ -1633,6 +1644,7 @@ static int b_madvise(void *a, size_t l, int adv)
     if (adv == 4 || adv == 8 || adv == 9 || adv == 20 || adv == 21) {
         anon_zap((uintptr_t)a, l);
 #if TARGET_OS_IPHONE
+        madvise(a, l, MADV_DONTNEED);
         madvise(a, l, MADV_FREE_REUSABLE);
 #endif
         return 0;

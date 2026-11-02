@@ -599,7 +599,15 @@ static void paint_end_clip(CGContextRef c, const int32_t *p, bool layered, CGRec
         CGColorRelease(fc);
         CGContextSetShadowWithColor(c, CGSizeZero, 0, NULL);
         int m = p[P_CFMODE];
-        CGContextSetBlendMode(c, m == 3 ? kCGBlendModeNormal : blend_of(m));
+        CGBlendMode bm = blend_of(m);
+        /* In Android, PorterDuff ColorFilters (SRC_IN=5, MULTIPLY=13, SRC_OVER=3, SRC_ATOP=9)
+         * tint non-transparent pixels and leave transparent background untouched.
+         * Using kCGBlendModeSourceIn inside the transparency layer ensures the tint color
+         * only touches pixels that were actually drawn, and never bleeds onto transparent areas. */
+        if (m == 3 || m == 5 || m == 9 || m == 13) {
+            bm = kCGBlendModeSourceIn;
+        }
+        CGContextSetBlendMode(c, bm);
         if (clip) {
             CGContextSaveGState(c);
             clip(c, ctx);
@@ -635,10 +643,12 @@ static void clip_image(CGContextRef c, const void *ctx)
 {
     const struct image_clip *ic = ctx;
     if (!ic || !ic->img) return;
-    if (CGImageIsMask(ic->img)) {
+    if (CGAffineTransformIsInvertible(ic->t)) {
         CGContextConcatCTM(c, ic->t);
         CGContextClipToMask(c, ic->r, ic->img);
         CGContextConcatCTM(c, CGAffineTransformInvert(ic->t));
+    } else {
+        CGContextClipToMask(c, ic->r, ic->img);
     }
 }
 
