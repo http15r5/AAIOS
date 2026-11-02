@@ -1329,8 +1329,9 @@ void husk_release_unused_compressed_heap(void)
 }
 static bool compressed_heap_request(size_t len)
 {
-    /* V8 asks for 8 GiB; Dart omits the final host page from that request. */
-    return len == 2 * PHANTOM_HALF || len == 2 * PHANTOM_HALF - (size_t)getpagesize();
+    /* V8 asks for 8 GiB or 4 GiB; Dart omits the final host page from that request. */
+    return len == 2 * PHANTOM_HALF || len == 2 * PHANTOM_HALF - (size_t)getpagesize()
+        || len == PHANTOM_HALF || len == PHANTOM_HALF - (size_t)getpagesize();
 }
 
 static void *phantom_reserve(size_t len)
@@ -1393,9 +1394,9 @@ static void *phantom_reserve(size_t len)
         }
         return MAP_FAILED;
     }
-    g_phantom[g_nphantom].base = (uintptr_t)res; g_phantom[g_nphantom].len = len; g_phantom[g_nphantom].real = PHANTOM_HALF;
+    g_phantom[g_nphantom].base = (uintptr_t)res; g_phantom[g_nphantom].len = len; g_phantom[g_nphantom].real = (len < PHANTOM_HALF) ? len : PHANTOM_HALF;
     g_nphantom++;
-    tl_log_line("mm: an 8 GiB reservation was refused; gave a 4 GiB phantom reservation at %p", res);
+    tl_log_line("mm: a compressed heap reservation (%zu bytes) was handled; gave a phantom reservation at %p", len, res);
     return res;
 }
 

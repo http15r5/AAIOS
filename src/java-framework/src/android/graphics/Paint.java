@@ -234,7 +234,10 @@ public class Paint {
     public void getTextBounds(CharSequence s, int start, int end, Rect bounds) { getTextBounds(s.toString(), start, end, bounds); }
     public void getTextBounds(char[] t, int index, int count, Rect bounds) { getTextBounds(new String(t, index, count), 0, count, bounds); }
     public void getTextPath(String s, int start, int end, float x, float y, Path path) { path.addRect(x, y + ascent(), x + measureText(s, start, end), y + descent(), Path.Direction.CW); }
-    public boolean hasGlyph(String s) { return true; }
+    public boolean hasGlyph(String s) {
+        if (s == null || s.isEmpty()) return false;
+        return husk.Gfx.txHasGlyph(s, huskFace());
+    }
     public float getUnderlinePosition() { return getTextSize() / 9; }
     public float getUnderlineThickness() { return getTextSize() / 18; }
     public float getStrikeThruPosition() { return -getTextSize() * 0.3f; }

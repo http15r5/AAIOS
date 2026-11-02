@@ -815,28 +815,54 @@ static CFAttributedStringRef make_attributed_string(CFStringRef safe_str, const 
             }
             if (!fallback || check_fg[0] == 0) {
                 if (fallback) { CFRelease(fallback); fallback = NULL; }
-                static const CFStringRef candidate_fonts[] = {
-                    CFSTR("Apple Symbols"),
-                    CFSTR("AppleColorEmoji"),
-                    CFSTR("Symbol"),
-                    CFSTR("Zapf Dingbats"),
-                    CFSTR(".AppleSystemUIFont"),
-                    CFSTR("STIXGeneral"),
-                    CFSTR("Menlo"),
-                    CFSTR("PingFang SC")
-                };
                 CGFloat fsize = CTFontGetSize(f);
                 if (fsize <= 0.0) fsize = 12.0;
-                for (size_t ci = 0; ci < sizeof(candidate_fonts)/sizeof(candidate_fonts[0]); ci++) {
-                    CTFontRef cand = CTFontCreateWithName(candidate_fonts[ci], fsize, NULL);
-                    if (cand) {
-                        CGGlyph cand_g[2] = {0, 0};
-                        CTFontGetGlyphsForCharacters(cand, &chars[i], cand_g, char_len);
-                        if (cand_g[0] != 0) {
-                            fallback = cand;
-                            break;
+
+                /* Try iOS system UI font cascade */
+                CTFontRef sys = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, fsize, NULL);
+                if (sys) {
+                    fallback = CTFontCreateForString(sys, safe_str, CFRangeMake(i, len - i));
+                    CFRelease(sys);
+                    if (fallback) {
+                        check_fg[0] = 0; check_fg[1] = 0;
+                        CTFontGetGlyphsForCharacters(fallback, &chars[i], check_fg, char_len);
+                        if (check_fg[0] == 0) {
+                            CFRelease(fallback);
+                            fallback = NULL;
                         }
-                        CFRelease(cand);
+                    }
+                }
+
+                /* Try AppleColorEmoji for emoji, dingbats, checkmarks */
+                if (!fallback) {
+                    CTFontRef emojiFont = CTFontCreateWithName(CFSTR("AppleColorEmoji"), fsize, NULL);
+                    if (emojiFont) {
+                        check_fg[0] = 0; check_fg[1] = 0;
+                        CTFontGetGlyphsForCharacters(emojiFont, &chars[i], check_fg, char_len);
+                        if (check_fg[0] != 0) fallback = emojiFont;
+                        else CFRelease(emojiFont);
+                    }
+                }
+
+                /* Common iOS candidate fallback fonts */
+                if (!fallback) {
+                    static const CFStringRef candidate_fonts[] = {
+                        CFSTR("PingFangSC-Regular"),
+                        CFSTR("HiraginoSans-W3"),
+                        CFSTR("HelveticaNeue"),
+                        CFSTR("Menlo-Regular")
+                    };
+                    for (size_t ci = 0; ci < sizeof(candidate_fonts)/sizeof(candidate_fonts[0]); ci++) {
+                        CTFontRef cand = CTFontCreateWithName(candidate_fonts[ci], fsize, NULL);
+                        if (cand) {
+                            CGGlyph cand_g[2] = {0, 0};
+                            CTFontGetGlyphsForCharacters(cand, &chars[i], cand_g, char_len);
+                            if (cand_g[0] != 0) {
+                                fallback = cand;
+                                break;
+                            }
+                            CFRelease(cand);
+                        }
                     }
                 }
             }
@@ -1502,6 +1528,41 @@ NAT(G_txWidths)
     return true;
 }
 
+/* (String s, long typeface) -> boolean */
+NAT(G_txHasGlyph)
+{
+    (void)self;
+    *ret = Ii(0);
+    CFStringRef s = cfstr(a[0].l, 0, -1);
+    if (!s) return true;
+    CFIndex len = CFStringGetLength(s);
+    if (len <= 0) { CFRelease(s); return true; }
+
+    gface *g = (gface *)(uintptr_t)a[1].j;
+    CTFontRef f = sized(g, 12.0f);
+    if (!f) { CFRelease(s); return true; }
+
+    UniChar stack_chars[64];
+    CGGlyph stack_glyphs[64];
+    UniChar *chars = (len <= 64) ? stack_chars : malloc(sizeof(UniChar) * (size_t)len);
+    CGGlyph *glyphs = (len <= 64) ? stack_glyphs : malloc(sizeof(CGGlyph) * (size_t)len);
+    CFStringGetCharacters(s, CFRangeMake(0, len), chars);
+
+    bool ok = CTFontGetGlyphsForCharacters(f, chars, glyphs, len);
+    if (ok) {
+        for (CFIndex i = 0; i < len; i++) {
+            if (glyphs[i] == 0) { ok = false; break; }
+        }
+    }
+
+    if (chars != stack_chars) free(chars);
+    if (glyphs != stack_glyphs) free(glyphs);
+    CFRelease(f);
+    CFRelease(s);
+    *ret = Ii(ok ? 1 : 0);
+    return true;
+}
+
 /* ---- Typeface */
 NAT(G_tfCreate) { (void)self; const char *fam = a[0].l ? tl_jni_string(a[0].l) : NULL; *ret = J((int64_t)(uintptr_t)face_family(fam, a[1].i)); return true; }
 NAT(G_tfDefault) { (void)self; (void)a; *ret = J((int64_t)(uintptr_t)default_face()); return true; }
@@ -1745,6 +1806,7 @@ static const struct { const char *name, *sig; dvm_native_fn fn; } k_gfx[] = {
     { "txBounds", "(Ljava/lang/String;II[IJ[I)V", G_txBounds },
     { "txBreak", "(Ljava/lang/String;IIF[IJZ)I", G_txBreak },
     { "txWidths", "(Ljava/lang/String;II[IJ[F)V", G_txWidths },
+    { "txHasGlyph", "(Ljava/lang/String;J)Z", G_txHasGlyph },
     { "tfCreate", "(Ljava/lang/String;I)J", G_tfCreate },
     { "tfDefault", "()J", G_tfDefault },
     { "tfDerive", "(JII)J", G_tfDerive },

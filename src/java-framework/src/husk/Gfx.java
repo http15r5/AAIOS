@@ -44,6 +44,7 @@ public final class Gfx {
     public static native void txBounds(String s, int start, int end, int[] paint, long typeface, int[] out);
     public static native int txBreak(String s, int start, int end, float maxWidth, int[] paint, long typeface, boolean words);
     public static native void txWidths(String s, int start, int end, int[] paint, long typeface, float[] out);
+    public static native boolean txHasGlyph(String s, long typeface);
 
     public static native long tfCreate(String family, int style);
     public static native long tfDefault();

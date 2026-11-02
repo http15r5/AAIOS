@@ -159,15 +159,19 @@ public class StaticLayout extends Layout {
         float avail = mEllipsizedWidth;
         float ell = paint.measureText("…");
         CharSequence t = mSource;
-        int n = start;
-        float w = 0;
-        while (n < end) {
-            float cw = husk.TextRuns.measure(t, start, n + 1, paint);
-            if (cw + ell > avail) break;
-            n++;
+        int low = start, high = end - 1, best = start;
+        while (low <= high) {
+            int mid = (low + high) >>> 1;
+            float cw = husk.TextRuns.measure(t, start, mid + 1, paint);
+            if (cw + ell <= avail) {
+                best = mid + 1;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
         }
-        mEllStart[line] = n - start;
-        mEllCount[line] = end - n;
+        mEllStart[line] = best - start;
+        mEllCount[line] = end - best;
     }
     /** Where the line from start breaks within avail pixels: the last word that fits, or as many characters as fit. */
     private static int breakLine(CharSequence text, int start, int end, int avail, TextPaint paint) {
@@ -182,19 +186,29 @@ public class StaticLayout extends Layout {
                 return start + Math.min(n, s.length());
             }
         }
-        // styled text: whole words while they fit
-        int lastSpace = -1, i = start;
-        while (i < end) {
-            char c = text.charAt(i);
-            float w = husk.TextRuns.measure(text, start, i + 1, paint);
-            if (w > avail && c != ' ') {
-                if (lastSpace >= start) return lastSpace + 1;
-                return Math.max(start + 1, i);
+        // styled text: fast check if entire range fits
+        if (husk.TextRuns.measure(text, start, end, paint) <= avail) return end;
+        // binary search for maximum prefix that fits
+        int low = start + 1, high = end, fit = start + 1;
+        while (low <= high) {
+            int mid = (low + high) >>> 1;
+            if (husk.TextRuns.measure(text, start, mid, paint) <= avail) {
+                fit = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
             }
-            if (c == ' ' || c == '\t' || c == '-') lastSpace = i;
-            i++;
         }
-        return end;
+        int lastSpace = -1;
+        for (int j = fit; j >= start; j--) {
+            char c = text.charAt(j);
+            if (c == ' ' || c == '\t' || c == '-') {
+                lastSpace = j;
+                break;
+            }
+        }
+        if (lastSpace >= start) return lastSpace + 1;
+        return Math.max(start + 1, fit);
     }
     private static void metrics(CharSequence text, int start, int end, TextPaint paint, Paint.FontMetricsInt out) {
         paint.getFontMetricsInt(out);
