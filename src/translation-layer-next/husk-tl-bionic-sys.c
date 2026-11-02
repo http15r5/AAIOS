@@ -390,7 +390,7 @@ static int b_epoll_ctl(int epfd, int op, int fd, const guest_epoll_event *ev)
     }
 
     if (!n) {
-        EV_SET(&k[n++], fd, EVFILT_READ, flags | EV_DISABLE, 0, 0, udata);
+        EV_SET(&k[n++], fd, EVFILT_READ, rflags | EV_DISABLE, 0, 0, udata);
     }
 
     TL_ERRNO_BEGIN();
