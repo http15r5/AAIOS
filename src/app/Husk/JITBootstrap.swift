@@ -91,6 +91,7 @@ enum JITBootstrap {
         // buffer with MAP_JIT and the translation layer makes its region itself.
         if canGrantOwnJIT && !stikDebugMayServiceTraps {
             selfGrantTried = true
+            prepareCompressedHeap()
             if mapJITWorks {
                 HuskLog.log("jit", "not trapping for a JIT region (no StikDebug); MAP_JIT executes here")
                 lastFailure = nil

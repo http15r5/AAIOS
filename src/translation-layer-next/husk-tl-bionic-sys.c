@@ -360,14 +360,19 @@ static int b_epoll_ctl(int epfd, int op, int fd, const guest_epoll_event *ev)
         return 0;
     }
     if (!ev) { tl_set_guest_errno(14 /* EFAULT */); return -1; }
-    uint16_t flags = EV_ADD | EV_ENABLE | ((ev->events & EPOLLET) ? EV_CLEAR : 0) | ((ev->events & EPOLLONESHOT) ? EV_ONESHOT : 0);
+    /* For EVFILT_READ, do NOT set EV_CLEAR so Darwin kqueue remains level-triggered on sockets.
+     * When Telegram/MTProto or any network client reads a partial packet batch, level-triggered
+     * reading ensures subsequent kevent/epoll_wait calls continue to deliver EPOLLIN until the
+     * socket buffer is completely drained, preventing chat load freezes. */
+    uint16_t rflags = EV_ADD | EV_ENABLE | ((ev->events & EPOLLONESHOT) ? EV_ONESHOT : 0);
+    uint16_t wflags = EV_ADD | EV_ENABLE | ((ev->events & EPOLLET) ? EV_CLEAR : 0) | ((ev->events & EPOLLONESHOT) ? EV_ONESHOT : 0);
     void *udata = (void *)(uintptr_t)ev->data;
 
     struct kevent k[4];
     int n = 0;
 
     if (ev->events & (EPOLLIN | EPOLLPRI | EPOLLRDHUP)) {
-        EV_SET(&k[n++], fd, EVFILT_READ, flags, 0, 0, udata);
+        EV_SET(&k[n++], fd, EVFILT_READ, rflags, 0, 0, udata);
     } else if (op == 3) {
         /* MOD: no longer interested in read: delete read filter */
         struct kevent kd;
@@ -376,7 +381,7 @@ static int b_epoll_ctl(int epfd, int op, int fd, const guest_epoll_event *ev)
     }
 
     if (ev->events & EPOLLOUT) {
-        EV_SET(&k[n++], fd, EVFILT_WRITE, flags, 0, 0, udata);
+        EV_SET(&k[n++], fd, EVFILT_WRITE, wflags, 0, 0, udata);
     } else if (op == 3) {
         /* MOD: no longer interested in write: delete write filter */
         struct kevent kd;
@@ -464,7 +469,13 @@ static int b_eventfd(unsigned initval, int flags)
 static int b_setsid(void) { return (int)getpid(); }
 static int b_wait(int *status) { (void)status; tl_set_guest_errno(10 /* ECHILD */); return -1; }
 static int b_execvp(const char *file, char *const argv[]) { (void)file; (void)argv; tl_set_guest_errno(38); return -1; }
-static int b_posix_madvise(void *addr, size_t len, int advice) { (void)addr; (void)len; (void)advice; return 0; }
+int tl_guest_madvise(void *a, size_t l, int adv);
+static int b_posix_madvise(void *addr, size_t len, int advice)
+{
+    /* Linux POSIX_MADV_DONTNEED is 4 */
+    if (advice == 4) return tl_guest_madvise(addr, len, 4);
+    return 0;
+}
 static int b_inotify_init1(int flags) { (void)flags; tl_set_guest_errno(38); return -1; }
 static int b_inotify_rm_watch(int fd, int wd) { (void)fd; (void)wd; tl_set_guest_errno(22); return -1; }
 

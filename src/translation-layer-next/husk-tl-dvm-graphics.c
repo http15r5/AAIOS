@@ -329,7 +329,9 @@ static CTFontRef sized(gface *g, float size)
     pthread_mutex_lock(&lock);
     if (cache[h].g == g && cache[h].q == q) { CTFontRef f = cache[h].f; CFRetain(f); pthread_mutex_unlock(&lock); return f; }
     CTFontRef f = g->base ? CTFontCreateCopyWithAttributes(g->base, q / 8.0, NULL, NULL) : NULL;
-    if (!f) {
+    if (f) {
+        f = font_with_cascade(f);
+    } else {
         f = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, q / 8.0, NULL);
         if (f) f = font_with_cascade(f);
     }
@@ -807,25 +809,56 @@ static CFAttributedStringRef make_attributed_string(CFStringRef safe_str, const 
                 continue;
             }
             CTFontRef fallback = CTFontCreateForString(f, safe_str, CFRangeMake(i, len - i));
-            if (!fallback) {
-                i += char_len;
-                continue;
+            CGGlyph check_fg[2] = {0, 0};
+            if (fallback) {
+                CTFontGetGlyphsForCharacters(fallback, &chars[i], check_fg, char_len);
             }
-            CFIndex k = i;
-            while (k < len) {
-                CFIndex next_len = (k + 1 < len && chars[k] >= 0xD800 && chars[k] <= 0xDBFF && chars[k + 1] >= 0xDC00 && chars[k + 1] <= 0xDFFF) ? 2 : 1;
-                CGGlyph fg[2] = {0, 0};
-                CTFontGetGlyphsForCharacters(fallback, &chars[k], fg, next_len);
-                if (fg[0] != 0) {
-                    k += next_len;
-                } else {
-                    if (k == i) k += next_len;
-                    break;
+            if (!fallback || check_fg[0] == 0) {
+                if (fallback) { CFRelease(fallback); fallback = NULL; }
+                static const CFStringRef candidate_fonts[] = {
+                    CFSTR("Apple Symbols"),
+                    CFSTR("AppleColorEmoji"),
+                    CFSTR("Symbol"),
+                    CFSTR("Zapf Dingbats"),
+                    CFSTR(".AppleSystemUIFont"),
+                    CFSTR("STIXGeneral"),
+                    CFSTR("Menlo"),
+                    CFSTR("PingFang SC")
+                };
+                CGFloat fsize = CTFontGetSize(f);
+                if (fsize <= 0.0) fsize = 12.0;
+                for (size_t ci = 0; ci < sizeof(candidate_fonts)/sizeof(candidate_fonts[0]); ci++) {
+                    CTFontRef cand = CTFontCreateWithName(candidate_fonts[ci], fsize, NULL);
+                    if (cand) {
+                        CGGlyph cand_g[2] = {0, 0};
+                        CTFontGetGlyphsForCharacters(cand, &chars[i], cand_g, char_len);
+                        if (cand_g[0] != 0) {
+                            fallback = cand;
+                            break;
+                        }
+                        CFRelease(cand);
+                    }
                 }
             }
-            CFAttributedStringSetAttribute(mas, CFRangeMake(i, k - i), kCTFontAttributeName, fallback);
-            CFRelease(fallback);
-            i = k;
+
+            if (fallback) {
+                CFIndex k = i + char_len;
+                while (k < len) {
+                    CFIndex next_len = (k + 1 < len && chars[k] >= 0xD800 && chars[k] <= 0xDBFF && chars[k + 1] >= 0xDC00 && chars[k + 1] <= 0xDFFF) ? 2 : 1;
+                    CGGlyph fg[2] = {0, 0};
+                    CTFontGetGlyphsForCharacters(fallback, &chars[k], fg, next_len);
+                    if (fg[0] != 0) {
+                        k += next_len;
+                    } else {
+                        break;
+                    }
+                }
+                CFAttributedStringSetAttribute(mas, CFRangeMake(i, k - i), kCTFontAttributeName, fallback);
+                CFRelease(fallback);
+                i = k;
+            } else {
+                i += char_len;
+            }
         }
     }
 

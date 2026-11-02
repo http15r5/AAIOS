@@ -562,6 +562,18 @@ static void fill_lib_standin_at(int dirfd, const char *name)
     snprintf(full, sizeof(full), "%s/%s", dir, name);
     fill_lib_standin(full);
 }
+static bool is_corrupt_cache_candidate(const char *path)
+{
+    if (!path || !strstr(path, "/cache/")) return false;
+    /* Never delete database, journal, state, or lock files */
+    if (strstr(path, ".db") || strstr(path, ".sqlite") || strstr(path, "-wal") ||
+        strstr(path, "-shm") || strstr(path, "-journal") || strstr(path, ".lock") ||
+        strstr(path, "/local-tmp/") || strstr(path, ".tmp")) return false;
+    /* Only font caches or specific font files that were left 0 bytes should be cleaned */
+    if (strstr(path, ".ttf") || strstr(path, ".otf") || strstr(path, "font") || strstr(path, ".cache")) return true;
+    return false;
+}
+
 static int b_open(const char *path, int flags, unsigned mode)
 {
     if (husk_binder_is_path(path)) return husk_binder_open();
@@ -600,7 +612,7 @@ static int b_open(const char *path, int flags, unsigned mode)
         { static int tr = -1; if (tr < 0) tr = getenv("TL_FILE_TRACE") ? atoi(getenv("TL_FILE_TRACE")) : 0; if (tr) tl_log_line("file: open(%s) -> %d (virtual: %llu bytes at %llu of %s)%s", path, fd, (unsigned long long)vf->size, (unsigned long long)vf->off, vf->host, fd < 0 ? (e == ENOENT ? " ENOENT" : " error") : ""); }
         return fd;
     }
-    if ((flags & 3) == O_RDONLY && strstr(real, "/cache/")) {
+    if ((flags & 3) == O_RDONLY && is_corrupt_cache_candidate(real)) {
         struct stat cst;
         if (stat(real, &cst) == 0 && S_ISREG(cst.st_mode) && cst.st_size < 8) {
             tl_log_line("file: removing corrupt 0-byte/truncated cache file %s", real);
@@ -834,7 +846,7 @@ static int b_access(const char *p, int m) { char b[1024]; jar_entry jar; if (jar
     /* the made-up /proc files exist, as b_stat says (Mono's runtime exits with "Mono requires /proc to be mounted" without /proc/self/maps) */
     if (p && (!strncmp(p, "/proc/", 6) || !strncmp(p, "/sys/", 5))) { static __thread char c[65536]; if (strstr(p, "/auxv") || synth_content(p, c, sizeof(c))) { if (m & 2) { tl_set_guest_errno(13); return -1; } return 0; } }
     const char *resolved = tl_path_resolve(p, b, sizeof(b));
-    if ((m & 2) == 0 && strstr(resolved, "/cache/")) {
+    if ((m & 2) == 0 && is_corrupt_cache_candidate(resolved)) {
         struct stat cst;
         if (stat(resolved, &cst) == 0 && S_ISREG(cst.st_mode) && cst.st_size < 8) {
             unlink(resolved);
@@ -929,7 +941,7 @@ static int b_stat(const char *p, guest_stat *g)
     ftrace("stat", p, r, e);
     if (r != 0 && e == ENOENT) tl_note_missing_file(p);
     if (r == 0) {
-        if (s.st_size < 8 && S_ISREG(s.st_mode) && strstr(resolved, "/cache/")) {
+        if (s.st_size < 8 && S_ISREG(s.st_mode) && is_corrupt_cache_candidate(resolved)) {
             tl_log_line("file: stat removing corrupt cache file %s", resolved);
             unlink(resolved);
             tl_set_guest_errno(ENOENT);
@@ -962,7 +974,7 @@ static int b_fstatat(int dirfd, const char *p, guest_stat *g, int flags)
     fill_lib_standin_at(dirfd, p);     /* .NET for Android sizes its assembly store this way before mapping it */
     TL_ERRNO_BEGIN(); int r = fstatat(dirfd, p, &s, (flags & 0x100) ? AT_SYMLINK_NOFOLLOW : 0); TL_ERRNO_END();
     if (r == 0) {
-        if (s.st_size < 8 && S_ISREG(s.st_mode) && p && strstr(p, "/cache/")) {
+        if (s.st_size < 8 && S_ISREG(s.st_mode) && p && is_corrupt_cache_candidate(p)) {
             unlink(p);
             tl_set_guest_errno(ENOENT);
             return -1;
@@ -1296,10 +1308,15 @@ void husk_prepare_compressed_heap(void)
     pthread_mutex_lock(&g_compressed_heap_lock);
     if (!g_compressed_heap) {
         vm_address_t address = 0;
-        kern_return_t kr = vm_map(mach_task_self(), &address, PHANTOM_HALF,
-            PHANTOM_HALF - 1, VM_FLAGS_ANYWHERE, MACH_PORT_NULL, 0, FALSE,
-            VM_PROT_NONE, VM_PROT_ALL, VM_INHERIT_COPY);
-        if (kr == KERN_SUCCESS) g_compressed_heap = address;
+        size_t masks[] = { PHANTOM_HALF - 1, ((size_t)2 << 30) - 1, ((size_t)1 << 30) - 1, 0 };
+        for (size_t mi = 0; mi < sizeof(masks)/sizeof(masks[0]) && !address; mi++) {
+            vm_address_t try_addr = 0;
+            kern_return_t kr = vm_map(mach_task_self(), &try_addr, PHANTOM_HALF,
+                masks[mi], VM_FLAGS_ANYWHERE, MACH_PORT_NULL, 0, FALSE,
+                VM_PROT_NONE, VM_PROT_ALL, VM_INHERIT_COPY);
+            if (kr == KERN_SUCCESS) address = try_addr;
+        }
+        if (address) g_compressed_heap = address;
     }
     pthread_mutex_unlock(&g_compressed_heap_lock);
 }
@@ -1324,10 +1341,14 @@ static void *phantom_reserve(size_t len)
     g_compressed_heap = 0; /* ownership transfers to g_phantom below */
     pthread_mutex_unlock(&g_compressed_heap_lock);
     if (!address) {
-        if (vm_map(mach_task_self(), &address, PHANTOM_HALF, PHANTOM_HALF - 1,
-                   VM_FLAGS_ANYWHERE, MACH_PORT_NULL, 0, FALSE,
-                   VM_PROT_NONE, VM_PROT_ALL, VM_INHERIT_COPY) != KERN_SUCCESS)
-            address = 0;
+        size_t masks[] = { PHANTOM_HALF - 1, ((size_t)2 << 30) - 1, ((size_t)1 << 30) - 1, 0 };
+        for (size_t mi = 0; mi < sizeof(masks)/sizeof(masks[0]) && !address; mi++) {
+            vm_address_t try_addr = 0;
+            if (vm_map(mach_task_self(), &try_addr, PHANTOM_HALF, masks[mi],
+                       VM_FLAGS_ANYWHERE, MACH_PORT_NULL, 0, FALSE,
+                       VM_PROT_NONE, VM_PROT_ALL, VM_INHERIT_COPY) == KERN_SUCCESS)
+                address = try_addr;
+        }
     }
     void *res = address ? (void *)address : MAP_FAILED;
     /* Reserve 5 GiB, which holds an aligned 4 GiB only when it starts in the first GiB of an alignment period. Mappings come one after
@@ -1345,20 +1366,36 @@ static void *phantom_reserve(size_t len)
         } else held[nheld++] = p;
     }
     for (int i = 0; i < nheld; i++) munmap(held[i], S);
-    if (res == MAP_FAILED) {                                  /* a 5 GiB mapping is refused too: try 4 GiB where it happens to fall aligned */
+    if (res == MAP_FAILED) {
         void *p = mmap(NULL, PHANTOM_HALF, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
-        if (p != MAP_FAILED && ((uintptr_t)p & (PHANTOM_HALF - 1))) { munmap(p, PHANTOM_HALF); p = MAP_FAILED; }
-        for (uintptr_t hint = (uintptr_t)3 << 32; p == MAP_FAILED && hint < ((uintptr_t)1 << 36); hint += PHANTOM_HALF) {
-            void *q = mmap((void *)hint, PHANTOM_HALF, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
-            if (q == (void *)hint) p = q;
-            else if (q != MAP_FAILED) munmap(q, PHANTOM_HALF);
+        if (p != MAP_FAILED) {
+            if (((uintptr_t)p & (PHANTOM_HALF - 1)) == 0) {
+                res = p;
+            } else {
+                for (uintptr_t hint = (uintptr_t)3 << 32; res == MAP_FAILED && hint < ((uintptr_t)1 << 36); hint += PHANTOM_HALF) {
+                    void *q = mmap((void *)hint, PHANTOM_HALF, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+                    if (q == (void *)hint) res = q;
+                    else if (q != MAP_FAILED) munmap(q, PHANTOM_HALF);
+                }
+                if (res == MAP_FAILED) res = p;
+                else munmap(p, PHANTOM_HALF);
+            }
         }
-        res = p;
     }
-    if (res == MAP_FAILED) return MAP_FAILED;
+    if (res == MAP_FAILED) {
+        size_t quarter = (size_t)2 << 30;
+        void *p = mmap(NULL, quarter, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        if (p != MAP_FAILED) {
+            g_phantom[g_nphantom].base = (uintptr_t)p; g_phantom[g_nphantom].len = len; g_phantom[g_nphantom].real = quarter;
+            g_nphantom++;
+            tl_log_line("mm: 4 GiB reservation failed; gave 2 GiB phantom reservation at %p", p);
+            return p;
+        }
+        return MAP_FAILED;
+    }
     g_phantom[g_nphantom].base = (uintptr_t)res; g_phantom[g_nphantom].len = len; g_phantom[g_nphantom].real = PHANTOM_HALF;
     g_nphantom++;
-    tl_log_line("mm: an 8 GiB reservation was refused; gave an aligned 4 GiB one at %p instead", res);
+    tl_log_line("mm: an 8 GiB reservation was refused; gave a 4 GiB phantom reservation at %p", res);
     return res;
 }
 
@@ -1585,6 +1622,8 @@ static int b_mprotect(void *a, size_t l, int prot)
         return 0;
     }
     TL_ERRNO_BEGIN(); int r = mprotect(a, l, prot_filter(prot, "mprotect")); int e = errno; TL_ERRNO_END(); mm_trace("mprotect", a, l, prot, r ? e : 0); return r; }
+int tl_guest_madvise(void *a, size_t l, int adv);
+int tl_guest_madvise(void *a, size_t l, int adv) { return b_madvise(a, l, adv); }
 static int b_madvise(void *a, size_t l, int adv)
 {
     mm_trace("madvise", a, l, adv, 0);
