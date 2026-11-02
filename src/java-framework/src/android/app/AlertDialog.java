@@ -27,6 +27,10 @@ public class AlertDialog extends Dialog implements DialogInterface {
     private DialogInterface.OnClickListener mItemListener;
     private DialogInterface.OnMultiChoiceClickListener mMultiListener;
     private TextView mMessageView, mTitleView;
+    private ScrollView mScrollView;
+    private FrameLayout mCustomPanel;
+    private LinearLayout mButtonBar;
+    private int mAccentColor;
     private boolean mBuilt;
     protected AlertDialog(Context c) { this(c, 0); }
     protected AlertDialog(Context c, boolean cancelable, OnCancelListener l) { this(c, 0); setCancelable(cancelable); setOnCancelListener(l); }
@@ -50,7 +54,8 @@ public class AlertDialog extends Dialog implements DialogInterface {
         if (mBuilt) return;
         mBuilt = true;
         Context c = getContext();
-        int textPrimary = themeColor(android.R.attr.textColorPrimary, 0xDE000000), textSecondary = themeColor(android.R.attr.textColorSecondary, 0x8A000000), accent = themeColor(android.R.attr.colorAccent, 0xFF6750A4);
+        int textPrimary = themeColor(android.R.attr.textColorPrimary, 0xDE000000), textSecondary = themeColor(android.R.attr.textColorSecondary, 0x8A000000);
+        mAccentColor = themeColor(android.R.attr.colorAccent, 0xFF6750A4);
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(0, (int) dp(24), 0, (int) dp(8));
@@ -79,17 +84,17 @@ public class AlertDialog extends Dialog implements DialogInterface {
         }
         // body: message, list or the app's view
         {   /* the message's TextView is always there (android:id/message), hidden with no message, as the platform's layout has it */
-            ScrollView sv = new ScrollView(c);
+            mScrollView = new ScrollView(c);
             mMessageView = new TextView(c);
             mMessageView.setId(android.R.id.message);
-            if (mMessage == null) sv.setVisibility(View.GONE);
+            if (mMessage == null || mMessage.length() == 0) mScrollView.setVisibility(View.GONE);
             mMessageView.setText(mMessage); mMessageView.setTextColor(textSecondary); mMessageView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
             mMessageView.setLineSpacing(0, 1.15f);
             mMessageView.setPadding((int) dp(24), 0, (int) dp(24), (int) dp(16));
-            sv.addView(mMessageView);
-            root.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-            ((LinearLayout.LayoutParams) sv.getLayoutParams()).height = ViewGroup.LayoutParams.WRAP_CONTENT;
-            ((LinearLayout.LayoutParams) sv.getLayoutParams()).weight = 0;
+            mScrollView.addView(mMessageView);
+            root.addView(mScrollView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            ((LinearLayout.LayoutParams) mScrollView.getLayoutParams()).height = ViewGroup.LayoutParams.WRAP_CONTENT;
+            ((LinearLayout.LayoutParams) mScrollView.getLayoutParams()).weight = 0;
         }
         if (mAdapter != null) {
             mListView = new ListView(c);
@@ -106,68 +111,119 @@ public class AlertDialog extends Dialog implements DialogInterface {
             root.addView(mListView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0f));
         }
         if (mView == null && mViewLayout != 0) mView = LayoutInflater.from(c).inflate(mViewLayout, root, false);
+        mCustomPanel = new FrameLayout(c);
+        mCustomPanel.setId(android.R.id.custom);
         if (mView != null) {
-            FrameLayout custom = new FrameLayout(c);
-            custom.setId(android.R.id.custom);
             if (mView.getParent() instanceof ViewGroup) ((ViewGroup) mView.getParent()).removeView(mView);
-            custom.addView(mView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            root.addView(custom, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            mCustomPanel.addView(mView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            mCustomPanel.setVisibility(View.VISIBLE);
+        } else {
+            mCustomPanel.setVisibility(View.GONE);
         }
-        // buttons, end-aligned: neutral at the start, then negative, positive
-        boolean any = false;
-        for (CharSequence t : mButtonText) if (t != null) any = true;
-        if (any) {
-            LinearLayout bar = new LinearLayout(c);
-            bar.setOrientation(LinearLayout.HORIZONTAL);
-            bar.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-            bar.setPadding((int) dp(16), (int) dp(8), (int) dp(16), 0);
-            int[] order = { 2, -1, 1, 0 };
-            for (int k : order) {
-                if (k == -1) { bar.addView(new Space(c), new LinearLayout.LayoutParams(0, 1, 1f)); continue; }
-                if (mButtonText[k] == null) continue;
-                Button b = new Button(c, null, 0);
-                b.setText(mButtonText[k]);
-                b.setAllCaps(false);
-                b.setTextColor(accent);
-                b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-                b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-                b.setBackground(null);
-                b.setMinHeight((int) dp(40)); b.setMinimumHeight((int) dp(40));
-                b.setPadding((int) dp(12), 0, (int) dp(12), 0);
-                b.setGravity(Gravity.CENTER);
-                TypedValue tv = new TypedValue();
-                try { if (c.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, tv, true) && tv.resourceId != 0) b.setBackground(c.getDrawable(tv.resourceId)); } catch (RuntimeException e) {}
-                final int which = k == 0 ? BUTTON_POSITIVE : k == 1 ? BUTTON_NEGATIVE : BUTTON_NEUTRAL;
-                final int idx = k;
-                b.setOnClickListener(v -> { if (mButtonListener[idx] != null) mButtonListener[idx].onClick(this, which); dismiss(); });
-                b.setId(k == 0 ? android.R.id.button1 : k == 1 ? android.R.id.button2 : android.R.id.button3);
-                mButtons[k] = b;
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                lp.leftMargin = (int) dp(8);
-                bar.addView(b, lp);
-            }
-            root.addView(bar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        } else root.setPadding(0, (int) dp(24), 0, (int) dp(mAdapter != null ? 8 : 24));
-        // as the platform's: all three buttons exist, the ones with no text hidden, so getButton never answers null once shown
-        for (int k = 0; k < 3; k++) if (mButtons[k] == null) {
-            Button b = new Button(c, null, 0);
-            b.setId(k == 0 ? android.R.id.button1 : k == 1 ? android.R.id.button2 : android.R.id.button3);
-            b.setVisibility(View.GONE);
-            mButtons[k] = b;
-        }
+        root.addView(mCustomPanel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // buttons, end-aligned: neutral at the start, then space, negative, positive
+        mButtonBar = new LinearLayout(c);
+        mButtonBar.setOrientation(LinearLayout.HORIZONTAL);
+        mButtonBar.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        mButtonBar.setPadding((int) dp(16), (int) dp(8), (int) dp(16), 0);
+
+        createAndAddButton(c, mButtonBar, 2, BUTTON_NEUTRAL, android.R.id.button3, false);
+        Space spacer = new Space(c);
+        mButtonBar.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+        createAndAddButton(c, mButtonBar, 1, BUTTON_NEGATIVE, android.R.id.button2, true);
+        createAndAddButton(c, mButtonBar, 0, BUTTON_POSITIVE, android.R.id.button1, true);
+
+        root.addView(mButtonBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        updateButtonBarVisibility();
+
         setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         int sw = husk.Native.screenWidth();
         getWindow().setLayout(Math.min((int) (sw * 0.9f), (int) dp(560)), ViewGroup.LayoutParams.WRAP_CONTENT);
     }
+    private void createAndAddButton(Context c, LinearLayout bar, int idx, int which, int id, boolean leftMargin) {
+        Button b = new Button(c, null, 0);
+        b.setId(id);
+        b.setAllCaps(false);
+        b.setTextColor(mAccentColor);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        b.setBackground(null);
+        b.setMinHeight((int) dp(40)); b.setMinimumHeight((int) dp(40));
+        b.setPadding((int) dp(12), 0, (int) dp(12), 0);
+        b.setGravity(Gravity.CENTER);
+        TypedValue tv = new TypedValue();
+        try {
+            if (c.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, tv, true) && tv.resourceId != 0) {
+                b.setBackground(c.getDrawable(tv.resourceId));
+            }
+        } catch (RuntimeException e) {}
+        b.setOnClickListener(v -> {
+            if (mButtonListener[idx] != null) mButtonListener[idx].onClick(this, which);
+            dismiss();
+        });
+        CharSequence text = mButtonText[idx];
+        b.setText(text);
+        b.setVisibility(text != null && text.length() > 0 ? View.VISIBLE : View.GONE);
+        mButtons[idx] = b;
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        if (leftMargin) lp.leftMargin = (int) dp(8);
+        bar.addView(b, lp);
+    }
+    private void updateButtonBarVisibility() {
+        if (mButtonBar == null) return;
+        boolean any = false;
+        for (Button b : mButtons) {
+            if (b != null && b.getVisibility() == View.VISIBLE) {
+                any = true;
+                break;
+            }
+        }
+        mButtonBar.setVisibility(any ? View.VISIBLE : View.GONE);
+    }
     public Button getButton(int which) { build(); int k = which == BUTTON_POSITIVE ? 0 : which == BUTTON_NEGATIVE ? 1 : which == BUTTON_NEUTRAL ? 2 : -1; return k < 0 ? null : mButtons[k]; }
     public ListView getListView() { build(); return mListView; }
-    @Override public void setTitle(CharSequence t) { mTitle = t; if (mTitleView != null) mTitleView.setText(t); }
+    @Override public void setTitle(CharSequence t) { mTitle = t; if (mTitleView != null) { mTitleView.setText(t); mTitleView.setVisibility(t != null && t.length() > 0 ? View.VISIBLE : View.GONE); } }
     public void setCustomTitle(View v) { mCustomTitle = v; }
-    public void setMessage(CharSequence m) { mMessage = m; if (mMessageView != null) mMessageView.setText(m); }
-    public void setView(View v) { mView = v; }
-    public void setView(View v, int l, int t, int r, int b) { mView = v; if (v != null) v.setPadding(l, t, r, b); }
-    public void setButton(int which, CharSequence text, android.os.Message msg) { setButton(which, text, (DialogInterface.OnClickListener) null); }
-    public void setButton(int which, CharSequence text, DialogInterface.OnClickListener l) { int k = which == BUTTON_POSITIVE ? 0 : which == BUTTON_NEGATIVE ? 1 : 2; mButtonText[k] = text; mButtonListener[k] = l; }
+    public void setMessage(CharSequence m) {
+        mMessage = m;
+        if (mMessageView != null) {
+            mMessageView.setText(m);
+            if (mScrollView != null) mScrollView.setVisibility(m != null && m.length() > 0 ? View.VISIBLE : View.GONE);
+        }
+    }
+    public void setView(View v) {
+        mView = v;
+        if (mCustomPanel != null) {
+            mCustomPanel.removeAllViews();
+            if (v != null) {
+                if (v.getParent() instanceof ViewGroup) ((ViewGroup) v.getParent()).removeView(v);
+                mCustomPanel.addView(v, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                mCustomPanel.setVisibility(View.VISIBLE);
+            } else {
+                mCustomPanel.setVisibility(View.GONE);
+            }
+        }
+    }
+    public void setView(View v, int l, int t, int r, int b) { setView(v); if (v != null) v.setPadding(l, t, r, b); }
+    public void setButton(int which, CharSequence text, android.os.Message msg) {
+        setButton(which, text, msg != null ? (d, w) -> {
+            try {
+                android.os.Message m = android.os.Message.obtain(msg);
+                if (m.getTarget() != null) m.sendToTarget();
+            } catch (Exception e) {}
+        } : (DialogInterface.OnClickListener) null);
+    }
+    public void setButton(int which, CharSequence text, DialogInterface.OnClickListener l) {
+        int k = which == BUTTON_POSITIVE ? 0 : which == BUTTON_NEGATIVE ? 1 : 2;
+        mButtonText[k] = text;
+        mButtonListener[k] = l;
+        if (mButtons[k] != null) {
+            mButtons[k].setText(text);
+            mButtons[k].setVisibility(text != null && text.length() > 0 ? View.VISIBLE : View.GONE);
+            updateButtonBarVisibility();
+        }
+    }
     @Deprecated public void setButton(CharSequence t, DialogInterface.OnClickListener l) { setButton(BUTTON_POSITIVE, t, l); }
     @Deprecated public void setButton2(CharSequence t, DialogInterface.OnClickListener l) { setButton(BUTTON_NEGATIVE, t, l); }
     @Deprecated public void setButton3(CharSequence t, DialogInterface.OnClickListener l) { setButton(BUTTON_NEUTRAL, t, l); }
@@ -296,9 +352,9 @@ public class AlertDialog extends Dialog implements DialogInterface {
     // ---- generated by tools/compat/fillmembers.py: the platform's members this class does not write (signatures only)
     public static final int LAYOUT_HINT_NONE = 0;
     public static final int LAYOUT_HINT_SIDE = 1;
-    public void setButton(java.lang.CharSequence p0, android.os.Message p1) {}
-    public void setButton2(java.lang.CharSequence p0, android.os.Message p1) {}
-    public void setButton3(java.lang.CharSequence p0, android.os.Message p1) {}
+    public void setButton(java.lang.CharSequence p0, android.os.Message p1) { setButton(BUTTON_POSITIVE, p0, p1); }
+    public void setButton2(java.lang.CharSequence p0, android.os.Message p1) { setButton(BUTTON_NEGATIVE, p0, p1); }
+    public void setButton3(java.lang.CharSequence p0, android.os.Message p1) { setButton(BUTTON_NEUTRAL, p0, p1); }
     public void setMessageHyphenationFrequency(int p0) {}
     public void setMessageMovementMethod(android.text.method.MovementMethod p0) {}
     // ---- end of generated members

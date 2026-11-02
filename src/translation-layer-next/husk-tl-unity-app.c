@@ -422,8 +422,7 @@ static void *launch_thread(void *arg)
             tl_audio_install();
             char fwres[1100];
             snprintf(fwres, sizeof(fwres), "%s/framework-res.apk", g_java_root);
-            int min_dim = (A.width > 0 && A.height > 0) ? (A.width < A.height ? A.width : A.height) : 0;
-            float eff_density = (min_dim > 0 && min_dim < 1000) ? ((float)min_dim / 392.0f) : g_java_density;
+            float eff_density = (g_java_density > 0.0f) ? g_java_density : 3.0f;
             tl_javaapp_config cfg = {
                 .apk_path = A.apk, .data_dir = A.data, .package_name = A.package, .width = A.width, .height = A.height,
                 .density = eff_density, .metal_layer = A.layer, .angle_egl = A.angle, .angle_gles = NULL,

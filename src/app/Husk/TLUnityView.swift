@@ -231,6 +231,28 @@ final class TLUnityUIView: UIView, UIKeyInput {
 
     private var firstLayout: Date?
 
+    private func updateInsets() {
+        guard let window = window else { return }
+        let inset = windowed ? UIEdgeInsets.zero : window.safeAreaInsets
+        let k = contentScaleFactor
+        let left = Int32((inset.left * k).rounded())
+        let top = Int32((inset.top * k).rounded())
+        let right = Int32((inset.right * k).rounded())
+        let bottom = Int32((inset.bottom * k).rounded())
+        if engine == .java {
+            husk_java_set_insets(left, top, right, bottom, 0)
+        } else if engine == .flutter {
+            husk_flutter_set_insets(top, right, bottom, left)
+        } else if engine == .sdl {
+            husk_sdl_set_safe_insets(left, top, right, bottom)
+        }
+    }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        updateInsets()
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         statsTimer?.invalidate()
@@ -238,6 +260,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
         if window != nil {
             husk_unity_set_paused(false)
             statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.updateStats() }
+            updateInsets()
         } else {
             husk_unity_set_paused(true)
             if isFirstResponder { resignFirstResponder() }
@@ -287,10 +310,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
         switch engine {
         case .sdl:
             // The notch and the rounded corners, in the surface's pixels: the game keeps its controls out of them.
-            if let inset = windowed ? UIEdgeInsets.zero : window?.safeAreaInsets {
-                let k = contentScaleFactor
-                husk_sdl_set_safe_insets(Int32(inset.left * k), Int32(inset.top * k), Int32(inset.right * k), Int32(inset.bottom * k))
-            }
+            updateInsets()
             // Vulkan for the SDL games that draw with it (directly, or through DXVK): MoltenVK, as for Unreal.
             if let fw = Bundle.main.privateFrameworksPath { husk_ue4_set_vulkan(fw + "/MoltenVK.framework/MoltenVK") }
             started = husk_sdl_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
@@ -312,20 +332,14 @@ final class TLUnityUIView: UIView, UIKeyInput {
             husk_java_set_runtime((Bundle.main.resourcePath ?? "") + "/java-runtime", Float(contentScaleFactor))
             husk_java_set_night_mode(traitCollection.userInterfaceStyle == .dark ? 1 : 0)
             // The notch and the home indicator, in surface pixels: the app's window keeps its content out of them.
-            if let inset = windowed ? UIEdgeInsets.zero : window?.safeAreaInsets {
-                let k = contentScaleFactor
-                husk_java_set_insets(Int32(inset.left * k), Int32(inset.top * k), Int32(inset.right * k), Int32(inset.bottom * k), 0)
-            }
+            updateInsets()
             attachWebHost(fresh: true)
             started = husk_java_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         case .gamemaker: started = husk_gamemaker_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         case .flutter:
             // The screen's scale is the app's device pixel ratio, and the notch and home indicator its padding, in surface pixels.
             husk_flutter_set_pixel_ratio(Float(contentScaleFactor))
-            if let inset = windowed ? UIEdgeInsets.zero : window?.safeAreaInsets {
-                let k = contentScaleFactor
-                husk_flutter_set_insets(Int32(inset.top * k), Int32(inset.right * k), Int32(inset.bottom * k), Int32(inset.left * k))
-            }
+            updateInsets()
             started = husk_flutter_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         case .minecraft: started = husk_gameactivity_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         case .unity: started = husk_unity_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)

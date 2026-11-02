@@ -150,6 +150,7 @@ static gbitmap *bm_from_image(CGImageRef img, int sample)
 
 typedef struct gface {
     CTFontRef base;                 /* at 12 pt; sized copies are cached below */
+    CGFontRef cg;
     int style;                      /* Typeface.BOLD 1, ITALIC 2 */
     int weight;
 } gface;
@@ -260,17 +261,6 @@ static CTFontRef font_with_cascade(CTFontRef f)
     CFDictionaryRef attrs = CFDictionaryCreate(NULL, keys, vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     CTFontDescriptorRef cascadedDesc = attrs ? CTFontDescriptorCreateWithAttributes(attrs) : NULL;
     CTFontRef outFont = cascadedDesc ? CTFontCreateCopyWithAttributes(f, fsize, NULL, cascadedDesc) : NULL;
-    if (!outFont) {
-        CTFontDescriptorRef baseDesc = CTFontCopyFontDescriptor(f);
-        if (baseDesc) {
-            CTFontDescriptorRef fullDesc = attrs ? CTFontDescriptorCreateCopyWithAttributes(baseDesc, attrs) : NULL;
-            if (fullDesc) {
-                outFont = CTFontCreateWithFontDescriptor(fullDesc, fsize, NULL);
-                CFRelease(fullDesc);
-            }
-            CFRelease(baseDesc);
-        }
-    }
     if (cascadedDesc) CFRelease(cascadedDesc);
     if (attrs) CFRelease(attrs);
     CFRelease(mutCascade);
@@ -288,6 +278,13 @@ static gface *face_make(CTFontRef base, int style, int weight)
     CTFontRef w = with_weight(base, weight, (style & 2) != 0);
     g->base = font_with_cascade(w);
     g->style = style; g->weight = weight;
+    return g;
+}
+
+static gface *face_make_cg(CTFontRef base, CGFontRef cg, int style, int weight)
+{
+    gface *g = face_make(base, style, weight);
+    if (cg) g->cg = (CGFontRef)CFRetain(cg);
     return g;
 }
 
@@ -327,17 +324,23 @@ static CTFontRef sized(gface *g, float size)
     int q = (int)lrintf(size * 8);
     unsigned h = ((unsigned)(uintptr_t)g * 2654435761u ^ (unsigned)q * 40503u) % 512;
     pthread_mutex_lock(&lock);
-    if (cache[h].g == g && cache[h].q == q) { CTFontRef f = cache[h].f; CFRetain(f); pthread_mutex_unlock(&lock); return f; }
-    CTFontRef f = g->base ? CTFontCreateCopyWithAttributes(g->base, q / 8.0, NULL, NULL) : NULL;
+    if (cache[h].g == g && cache[h].q == q && cache[h].f) { CTFontRef f = cache[h].f; CFRetain(f); pthread_mutex_unlock(&lock); return f; }
+    CTFontRef f = NULL;
+    if (g->cg) {
+        f = CTFontCreateWithGraphicsFont(g->cg, q / 8.0, NULL, NULL);
+    }
+    if (!f && g->base) {
+        f = CTFontCreateCopyWithAttributes(g->base, q / 8.0, NULL, NULL);
+    }
+    if (!f) {
+        f = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, q / 8.0, NULL);
+    }
     if (f) {
         f = font_with_cascade(f);
-    } else {
-        f = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, q / 8.0, NULL);
-        if (f) f = font_with_cascade(f);
     }
     if (cache[h].f) CFRelease(cache[h].f);
     cache[h].g = g; cache[h].q = q; cache[h].f = f;
-    CFRetain(f);
+    if (f) CFRetain(f);
     pthread_mutex_unlock(&lock);
     return f;
 }
@@ -784,6 +787,26 @@ static CFStringRef cfstr(jobj *s, int start, int end)
     return str ? str : CFStringCreateWithCharacters(NULL, empty, 0);
 }
 
+static CTFontRef get_cached_emoji_font(CGFloat size)
+{
+    static CTFontRef s_emoji = NULL;
+    static CGFloat s_emoji_sz = 0.0;
+    static pthread_mutex_t s_emoji_lock = PTHREAD_MUTEX_INITIALIZER;
+    if (size <= 0.0) size = 12.0;
+    pthread_mutex_lock(&s_emoji_lock);
+    if (s_emoji && s_emoji_sz == size) {
+        CFRetain(s_emoji);
+        pthread_mutex_unlock(&s_emoji_lock);
+        return s_emoji;
+    }
+    if (s_emoji) { CFRelease(s_emoji); s_emoji = NULL; }
+    s_emoji = CTFontCreateWithName(CFSTR("AppleColorEmoji"), size, NULL);
+    s_emoji_sz = size;
+    CTFontRef ret = s_emoji ? (CTFontRef)CFRetain(s_emoji) : NULL;
+    pthread_mutex_unlock(&s_emoji_lock);
+    return ret;
+}
+
 static CFAttributedStringRef make_attributed_string(CFStringRef safe_str, const int32_t *p, gface *g)
 {
     if (!safe_str) return NULL;
@@ -812,6 +835,9 @@ static CFAttributedStringRef make_attributed_string(CFStringRef safe_str, const 
     if (kern) CFAttributedStringSetAttribute(mas, allRange, kCTKernAttributeName, kern);
 
     if (!all_covered && f) {
+        CGFloat fsize = CTFontGetSize(f);
+        if (fsize <= 0.0) fsize = 12.0;
+
         for (CFIndex i = 0; i < len; ) {
             CFIndex char_len = (i + 1 < len && chars[i] >= 0xD800 && chars[i] <= 0xDBFF && chars[i + 1] >= 0xDC00 && chars[i + 1] <= 0xDFFF) ? 2 : 1;
             if (chars[i] <= 0x20 || glyphs[i] != 0) {
@@ -822,57 +848,20 @@ static CFAttributedStringRef make_attributed_string(CFStringRef safe_str, const 
             CGGlyph check_fg[2] = {0, 0};
             if (fallback) {
                 CTFontGetGlyphsForCharacters(fallback, &chars[i], check_fg, char_len);
+                if (check_fg[0] == 0) {
+                    CFRelease(fallback);
+                    fallback = NULL;
+                }
             }
-            if (!fallback || check_fg[0] == 0) {
-                if (fallback) { CFRelease(fallback); fallback = NULL; }
-                CGFloat fsize = CTFontGetSize(f);
-                if (fsize <= 0.0) fsize = 12.0;
-
-                /* Try iOS system UI font cascade */
-                CTFontRef sys = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, fsize, NULL);
-                if (sys) {
-                    fallback = CTFontCreateForString(sys, safe_str, CFRangeMake(i, len - i));
-                    CFRelease(sys);
-                    if (fallback) {
-                        check_fg[0] = 0; check_fg[1] = 0;
-                        CTFontGetGlyphsForCharacters(fallback, &chars[i], check_fg, char_len);
-                        if (check_fg[0] == 0) {
-                            CFRelease(fallback);
-                            fallback = NULL;
-                        }
-                    }
-                }
-
-                /* Try AppleColorEmoji for emoji, dingbats, checkmarks */
-                if (!fallback) {
-                    CTFontRef emojiFont = CTFontCreateWithName(CFSTR("AppleColorEmoji"), fsize, NULL);
-                    if (emojiFont) {
-                        check_fg[0] = 0; check_fg[1] = 0;
-                        CTFontGetGlyphsForCharacters(emojiFont, &chars[i], check_fg, char_len);
-                        if (check_fg[0] != 0) fallback = emojiFont;
-                        else CFRelease(emojiFont);
-                    }
-                }
-
-                /* Common iOS candidate fallback fonts */
-                if (!fallback) {
-                    static const CFStringRef candidate_fonts[] = {
-                        CFSTR("PingFangSC-Regular"),
-                        CFSTR("HiraginoSans-W3"),
-                        CFSTR("HelveticaNeue"),
-                        CFSTR("Menlo-Regular")
-                    };
-                    for (size_t ci = 0; ci < sizeof(candidate_fonts)/sizeof(candidate_fonts[0]); ci++) {
-                        CTFontRef cand = CTFontCreateWithName(candidate_fonts[ci], fsize, NULL);
-                        if (cand) {
-                            CGGlyph cand_g[2] = {0, 0};
-                            CTFontGetGlyphsForCharacters(cand, &chars[i], cand_g, char_len);
-                            if (cand_g[0] != 0) {
-                                fallback = cand;
-                                break;
-                            }
-                            CFRelease(cand);
-                        }
+            if (!fallback) {
+                CTFontRef emojiFont = get_cached_emoji_font(fsize);
+                if (emojiFont) {
+                    check_fg[0] = 0; check_fg[1] = 0;
+                    CTFontGetGlyphsForCharacters(emojiFont, &chars[i], check_fg, char_len);
+                    if (check_fg[0] != 0) {
+                        fallback = emojiFont;
+                    } else {
+                        CFRelease(emojiFont);
                     }
                 }
             }
@@ -1582,7 +1571,7 @@ NAT(G_tfDerive)
     gface *g = H(gface, 0);
     if (!g) g = default_face();
     int style = a[1].i, weight = a[2].i;
-    *ret = J((int64_t)(uintptr_t)face_make(g->base, style, weight > 0 ? weight : ((style & 1) ? 700 : 400)));
+    *ret = J((int64_t)(uintptr_t)face_make_cg(g->base, g->cg, style, weight > 0 ? weight : ((style & 1) ? 700 : 400)));
     return true;
 }
 /* (byte[] data) -> long, 0 when it is not a font */
@@ -1599,25 +1588,20 @@ NAT(G_tfFromData)
     CGDataProviderRef provider = CGDataProviderCreateWithCFData(cfdata);
     CGFontRef cgFont = provider ? CGFontCreateWithDataProvider(provider) : NULL;
     if (provider) CGDataProviderRelease(provider);
-
-    CTFontRef baseFont = NULL;
-    if (cgFont) {
-        CTFontManagerRegisterGraphicsFont(cgFont, NULL);
-        baseFont = CTFontCreateWithGraphicsFont(cgFont, 12, NULL, NULL);
-        CGFontRelease(cgFont);
-    }
-    if (!baseFont) {
-        CTFontDescriptorRef desc = CTFontManagerCreateFontDescriptorFromData(cfdata);
-        if (desc) {
-            baseFont = CTFontCreateWithFontDescriptor(desc, 12, NULL);
-            CFRelease(desc);
-        }
-    }
     CFRelease(cfdata);
-    if (!baseFont) return true;
-    CTFontRef f = font_with_cascade(baseFont);
+
+    if (!cgFont) return true;
+    CTFontManagerRegisterGraphicsFont(cgFont, NULL);
+
+    CTFontRef baseFont = CTFontCreateWithGraphicsFont(cgFont, 12, NULL, NULL);
+    if (!baseFont) {
+        CGFontRelease(cgFont);
+        return true;
+    }
     gface *g = calloc(1, sizeof(*g));
-    g->base = f; g->weight = 400;
+    g->base = baseFont;
+    g->cg = cgFont;
+    g->weight = 400;
     *ret = J((int64_t)(uintptr_t)g);
     return true;
 }

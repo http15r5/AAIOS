@@ -334,8 +334,7 @@ NAT(N_density)
     (void)self; (void)a;
     float d = A.cfg.density;
     if (d <= 0.0f) {
-        int min_dim = (A.cfg.width > 0 && A.cfg.height > 0) ? (A.cfg.width < A.cfg.height ? A.cfg.width : A.cfg.height) : 0;
-        d = (min_dim > 0 && min_dim < 1000) ? ((float)min_dim / 392.0f) : 3.0f;
+        d = 3.0f;
     }
     *ret = F(d);
     return true;
