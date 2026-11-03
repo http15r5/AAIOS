@@ -111,7 +111,7 @@ static bool pac_target_mapped(uintptr_t p)
     vm_region_basic_info_data_64_t bi;
     mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
     mach_port_t port = MACH_PORT_NULL;
-    if (vm_region(mach_task_self(), &a, &sz, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&bi, &cnt, &port) != KERN_SUCCESS)
+    if (vm_region_64(mach_task_self(), &a, &sz, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&bi, &cnt, &port) != KERN_SUCCESS)
         return false;
     if (port != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), port);
     return a <= (vm_address_t)p && (vm_address_t)p < a + sz && (bi.protection & VM_PROT_READ);
