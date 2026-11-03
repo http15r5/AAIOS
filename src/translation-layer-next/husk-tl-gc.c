@@ -39,7 +39,6 @@
 #include <unistd.h>
 
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
 #include <mach/thread_act.h>
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>

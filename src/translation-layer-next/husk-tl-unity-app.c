@@ -6,7 +6,7 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
+#include <mach/vm_map.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -101,19 +101,20 @@ static void where(char *out, size_t n, uintptr_t addr)
 
 static struct sigaction g_prev[32];
 
-/* Whether the process maps `p`: a mach region query, which touches no memory. */
+/* Whether the process maps `p`: a mach region query, which touches no memory. On arm64 the plain vm_region's
+ * types are already 64-bit (mach_vm_region's header refuses to compile there), so this is the one call for both. */
 static bool pac_target_mapped(uintptr_t p)
 {
     if (p < 0x1000) return false;
-    mach_vm_address_t a = (mach_vm_address_t)(p & ~0xfffull);
-    mach_vm_size_t sz = 0;
+    vm_address_t a = (vm_address_t)(p & ~0xfffull);
+    vm_size_t sz = 0;
     vm_region_basic_info_data_64_t bi;
     mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
     mach_port_t port = MACH_PORT_NULL;
-    if (mach_vm_region(mach_task_self(), &a, &sz, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&bi, &cnt, &port) != KERN_SUCCESS)
+    if (vm_region(mach_task_self(), &a, &sz, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&bi, &cnt, &port) != KERN_SUCCESS)
         return false;
     if (port != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), port);
-    return a <= (mach_vm_address_t)p && (mach_vm_address_t)p < a + sz && (bi.protection & VM_PROT_READ);
+    return a <= (vm_address_t)p && (vm_address_t)p < a + sz && (bi.protection & VM_PROT_READ);
 }
 
 /*
