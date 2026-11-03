@@ -39,6 +39,7 @@
 #include <unistd.h>
 
 #include <mach/mach.h>
+#include <mach/mach_vm.h>
 #include <mach/thread_act.h>
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
@@ -263,7 +264,7 @@ static void scan_mach_threads(wl *w)
             mach_msg_type_number_t cnt = ARM_THREAD_STATE64_COUNT;
             if (thread_get_state(threads[i], ARM_THREAD_STATE64, (thread_state_t)&st, &cnt) == KERN_SUCCESS) {
                 for (int r = 0; r < 29; r++) mark_word(w, (uintptr_t)st.__x[r]);
-                sp = (uintptr_t)st.__sp;
+                sp = (uintptr_t)arm_thread_state64_get_sp(st);      /* the accessor works whether the SDK's thread state is opaque or not */
             }
 #endif
         }
