@@ -39,9 +39,13 @@ static jobj *obj_alloc(uint8_t kind, tl_jclass *cls)
 {
     jobj *o = calloc(1, sizeof(*o));
     if (!o) return NULL;
-    o->refs = 1;
+    /* With the interpreter up, Java reachability owns the newborn and the count would only hide it: native code that wants
+     * to keep one takes a reference itself. Without it, the creator's count is the only protection there is. */
+    o->refs = tl_dvm ? 0 : 1;
     o->kind = kind;
     o->cls = cls;
+    o->gc_epoch = tl_gc_epoch();
+    tl_gc_queue_candidate(o);           /* every allocation is born on the collector's registry */
     return o;
 }
 
@@ -50,10 +54,14 @@ jobj *tl_jni_ref(jobj *o) { if (o) __atomic_add_fetch(&o->refs, 1, __ATOMIC_RELA
 void tl_jni_unref(jobj *o)
 {
     if (!o || o->kind == TL_K_CLASS) return;
-    /* With the Java runtime up, objects live as long as Java can reach them, which reference counts from native code do not
-     * know about: nothing is freed here (a tracing collector's job). */
-    if (tl_dvm) return;
+    /* A collector-owned object (refs == 0) held only as an implicit local: dropping it starts its doom clock, the count stays 0. */
+    if (__atomic_load_n(&o->refs, __ATOMIC_RELAXED) == 0) { o->gc_epoch = tl_gc_epoch(); return; }
     if (__atomic_sub_fetch(&o->refs, 1, __ATOMIC_ACQ_REL) != 0) return;
+    /* With the Java runtime up, an object the native side has let go of may still be reachable from Java: freeing it here is
+     * what crashed TikTok and Telegram before (SIGSEGV 0x400, commit 8b6e803). Hand it to the tracing collector instead, which
+     * frees it only when a collection cannot reach it from any root -- and only on the second pass. */
+    if (tl_dvm) { o->gc_epoch = tl_gc_epoch(); return; }
+    tl_gc_unregister_candidate(o);      /* the legacy immediate free, for runtimes without the interpreter */
     switch (o->kind) {
     case TL_K_STRING: free(o->str.utf8); free(o->str.u16); break;
     case TL_K_PRIM_ARRAY: free(o->arr.data); break;
@@ -154,6 +162,7 @@ jobj *tl_jni_class_object(const char *name) { return tl_jni_class(name)->mirror;
 jobj *tl_jni_new_object(tl_jclass *cls)
 {
     if (!cls || (uintptr_t)cls < 0x1000ull) return NULL;
+    tl_gc_gate();
     jobj *o = obj_alloc(TL_K_OBJECT, cls);
     if (!o) return NULL;
     if (tl_dvm && cls->dvm) {
@@ -168,6 +177,7 @@ jobj *tl_jni_new_object(tl_jclass *cls)
 
 jobj *tl_jni_new_string(const char *utf8)
 {
+    tl_gc_gate();
     jobj *o = obj_alloc(TL_K_STRING, tl_jni_class("java/lang/String"));
     if (!o) return NULL;
     o->str.utf8 = strdup(utf8 ? utf8 : "");
@@ -184,6 +194,7 @@ static uint8_t esz_of(char t)
 jobj *tl_jni_new_prim_array(char etype, uint32_t len)
 {
     if (etype == 'Z' || etype == 'B' || etype == 'C' || etype == 'S' || etype == 'I' || etype == 'J' || etype == 'F' || etype == 'D') { /* ok */ }
+    tl_gc_gate();
     char cn[4] = { '[', etype, 0 };
     jobj *o = obj_alloc(TL_K_PRIM_ARRAY, tl_jni_class(cn));
     if (!o) return NULL;
@@ -195,6 +206,7 @@ jobj *tl_jni_new_prim_array(char etype, uint32_t len)
 
 jobj *tl_jni_new_obj_array(tl_jclass *elem, uint32_t len)
 {
+    tl_gc_gate();
     char cn[1024];
     snprintf(cn, sizeof(cn), "[L%s;", (elem && (uintptr_t)elem >= 0x1000ull) ? elem->name : "java/lang/Object");
     jobj *o = obj_alloc(TL_K_OBJ_ARRAY, tl_jni_class(cn));
@@ -490,6 +502,7 @@ void tl_jni_throw(const char *cls, const char *msg)
 }
 bool tl_jni_pending(void) { return t_pending != NULL; }
 jobj *tl_jni_pending_object(void) { return t_pending; }
+jobj **tl_jni_pending_slot(void) { return &t_pending; }   /* the collector roots each thread's pending exception through this */
 void tl_jni_set_pending(jobj *e) { t_pending = e; }
 void tl_jni_clear(void) { t_pending = NULL; }
 

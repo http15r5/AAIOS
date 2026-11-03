@@ -222,6 +222,14 @@ NAT(String_intern)
 /* The canonical copy of a string (String.intern): every string literal goes through here, so equal literals are one object across
  * classes and dex files, as Java promises -- code compares them with == (p4a's AssetExtract: method == "private"). */
 jobj *dvm_intern(jobj *s) { jvalue r; if (!s || !String_intern(s, NULL, &r) || !r.l) return s; return r.l; }
+
+/* Every interned string, for the collector's precise roots (the table's contents are on the C heap, out of the data scan's sight). */
+void dvm_interns_each(void (*fn)(jobj *o))
+{
+    pthread_mutex_lock(&g_intern_lock);
+    if (g_interned) for (uint32_t i = 0; i < g_icap; i++) if (g_interned[i]) fn(g_interned[i]);
+    pthread_mutex_unlock(&g_intern_lock);
+}
 NAT(String_toCharArray)
 {
     (void)a;

@@ -17,6 +17,7 @@
 #ifndef HUSK_TL_JNI_H
 #define HUSK_TL_JNI_H
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -37,6 +38,9 @@ enum { TL_K_OBJECT, TL_K_CLASS, TL_K_STRING, TL_K_PRIM_ARRAY, TL_K_OBJ_ARRAY };
 struct jobj {
     uint32_t refs;
     uint8_t kind;
+    uint8_t gc_mark;                    /* the tracing collector: reachable this round */
+    uint8_t gc_doom;                    /* unreachable once; freed when still unreachable the next round */
+    uint8_t gc_queued;                  /* sitting in the collector's candidate list (refs == 0) */
     tl_jclass *cls;
     union {
         struct { char *utf8; uint16_t *u16; int32_t len16; } str;   /* u16: the UTF-16 form, made when the interpreter first needs it */
@@ -46,8 +50,11 @@ struct jobj {
     };
     jvalue *fields;                     /* instance fields, indexed by tl_jfield::index */
     uint32_t nfields;
+    uint32_t gc_epoch;                  /* the collector round this object was born (or doomed) in */
     void *native;                       /* an implementation's own state */
     void *monitor;
+    struct jobj *gc_next;               /* the candidate list's link */
+    struct jobj *gc_prev;
 };
 
 /* What an implemented Java method receives. */
@@ -130,6 +137,33 @@ const char *tl_jni_reflected_sig(const jobj *member);        /* a method's or fi
 
 /* Call a Java method by name from C (HLE-implemented or not), as native code would. */
 jvalue tl_jni_call(jobj *self_or_class, const char *name, const char *sig, const jvalue *args);
+
+/* ---------------------------------------------------- the tracing collector (husk-tl-gc.c)
+ *
+ * With the interpreter up, objects live as long as Java can reach them, which native reference
+ * counts do not know about: reachability is a tracing collector's job. The DVM's allocations carry
+ * refs == 0 (Java reachability owns them), native allocations keep their own counts, and an object
+ * is freed when a collection finds it unreachable with refs == 0 -- twice in a row (doom-release),
+ * so a pointer held only in a register or a transient frame survives by a whole round.
+ */
+
+/* The gate, open by default. Checking it is one relaxed load; park_slow runs only while a
+ * collection is in flight. Interpreter instructions and every DVM mutation call this. */
+extern _Atomic int tl_gc_gate_open;
+void tl_gc_park_slow(void);
+static inline void tl_gc_gate(void)
+{
+    if (__builtin_expect(atomic_load_explicit(&tl_gc_gate_open, memory_order_relaxed) == 0, 0)) tl_gc_park_slow();
+}
+
+void tl_gc_init(void);
+void tl_gc_register_thread(void);             /* an interpreter thread: its pending slot and stack become roots */
+void tl_gc_queue_candidate(jobj *o);          /* an object joins the registry (every allocation is born on it) */
+void tl_gc_unregister_candidate(jobj *o);     /* the legacy free path's node must leave the registry */
+uint32_t tl_gc_epoch(void);                   /* the current collection round; newborn objects carry it */
+void tl_gc_collect_now(const char *why);      /* a full collection, from any thread */
+void tl_gc_maybe(size_t avail_bytes);         /* the heartbeat's trigger: collect when the phone runs low */
+void tl_gc_set_dvm_roots(void (*walk)(void (*visit)(jobj *)));   /* the interpreter's own root set */
 
 #ifdef __cplusplus
 }

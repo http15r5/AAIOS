@@ -277,7 +277,6 @@ jobj *tl_dvm_string_u16(const uint16_t *s, int32_t n)
         else o->str.u16[0] = 0;
     }
     o->str.len16 = n;
-    o->refs = 1u << 30;
     if (g_string_class) { o->cls = g_string_class; dvm_slots(o); }
     return o;
 }
@@ -286,7 +285,6 @@ jobj *dvm_new_string_utf8(const char *s)
 {
     jobj *o = tl_jni_new_string(s);
     if (!o) return NULL;
-    o->refs = 1u << 30;
     if (g_string_class) { o->cls = g_string_class; dvm_slots(o); }
     return o;
 }
@@ -650,6 +648,7 @@ jvalue *dvm_slots(jobj *o)
  * that way is how a register ends up holding garbage. */
 jvalue *dvm_grow_slots(jobj *o, uint32_t need)
 {
+    tl_gc_gate();                   /* reallocating an object's slots while the collector walks them is not allowed */
     if (!o || (uintptr_t)o < 0x1000ull) return NULL;
     pthread_mutex_lock(&g_lock);
     if (o->nfields < need) {
@@ -692,7 +691,7 @@ jobj *dvm_new_object(tl_jclass *jc)
 {
     if (!jc || (uintptr_t)jc < 0x1000ull) return NULL;
     jobj *o = tl_jni_new_object(jc);
-    if (o) o->refs = 1u << 30;
+    if (o) o->refs = 0;             /* Java reachability owns it from here: the collector tracks it, the count would only hide it */
     return o;
 }
 
@@ -823,6 +822,7 @@ static bool mon_mine(mon *m) { pthread_t w = atomic_load(&m->owner); return w &&
 bool dvm_holds_lock(jobj *o) { mon *m = o ? o->monitor : NULL; return m && mon_mine(m); }
 void dvm_monitor_enter(jobj *o)
 {
+    tl_gc_gate();
     mon *m = monitor_of(o);
     if (mon_mine(m)) { m->count++; return; }
     pthread_mutex_lock(&m->mu);
@@ -839,6 +839,7 @@ bool dvm_monitor_exit(jobj *o)
 void dvm_monitor_wait(jobj *o, int64_t ms, int32_t ns);
 void dvm_monitor_wait(jobj *o, int64_t ms, int32_t ns)
 {
+    tl_gc_gate();
     mon *m = monitor_of(o);
     if (!mon_mine(m)) { dvm_throw("java/lang/IllegalMonitorStateException", "object not locked by thread before wait()"); return; }
     int held = m->count;
@@ -855,13 +856,14 @@ void dvm_monitor_wait(jobj *o, int64_t ms, int32_t ns)
     m->count = held;
 }
 void dvm_monitor_notify(jobj *o, bool all);
-void dvm_monitor_notify(jobj *o, bool all) { mon *m = monitor_of(o); if (all) pthread_cond_broadcast(&m->cv); else pthread_cond_signal(&m->cv); }
+void dvm_monitor_notify(jobj *o, bool all) { tl_gc_gate(); mon *m = monitor_of(o); if (all) pthread_cond_broadcast(&m->cv); else pthread_cond_signal(&m->cv); }
 
 /* ================================================================== class initialisation */
 
 bool dvm_ensure_init(dvm_class *c)
 {
     if (!c || c->state == CS_INITIALIZED) return true;
+    tl_gc_gate();                   /* attaching and initialising a class mutates what the collector walks */
     pthread_mutex_lock(&c->init_lock);
     if (c->state == CS_INITIALIZED) { pthread_mutex_unlock(&c->init_lock); return true; }
     if (c->state == CS_FAILED) { pthread_mutex_unlock(&c->init_lock); return dvm_throw("java/lang/NoClassDefFoundError", "%s failed to initialise", c->name); }
@@ -1421,11 +1423,11 @@ static jobj *new_array(tl_jclass *arrcls, int32_t n)
     if (name[1] == 'L' || name[1] == '[') {
         char elem[400]; desc_to_name(name + 1, elem, sizeof(elem));
         a = tl_jni_new_obj_array(class_for_desc(name + 1), (uint32_t)n);
+        if (!a) return NULL;
         a->cls = arrcls;
     } else {
         a = tl_jni_new_prim_array(name[1], (uint32_t)n);
     }
-    a->refs = 1u << 30;
     return a;
 }
 
@@ -1705,7 +1707,8 @@ static bool varhandle(const char *mode, const char *shorty, jobj *vh, const uint
 #define B4 (w >> 12)
 #define AA (w >> 8)
 #define THROW_IF(c) do { if (c) goto exception; } while (0)
-#define NEXT(n) do { pc += (n); goto dispatch; } while (0)
+/* every instruction is a safe point: the gate is one relaxed load, and parks only while a collection runs */
+#define NEXT(n) do { pc += (n); tl_gc_gate(); goto dispatch; } while (0)
 
 static bool __attribute__((noinline)) handle_invoke_polymorphic(dvm_dex *dex, dvm_method *m, uint16_t w, const uint16_t *insns, uint32_t pc, uint64_t *regs, jvalue *result)
 {
@@ -1744,6 +1747,7 @@ static bool interpret(dvm_method *m, uint64_t *regs, jvalue *ret)
     uint32_t pc = 0;
     jvalue result; result.j = 0;
     jobj *caught = NULL;
+    tl_gc_register_thread();        /* this thread's pending exception and stack become collector roots */
     if ((m->flags & 0x20) /* synchronized */) dvm_monitor_enter((m->flags & 8) ? m->cls->jc->mirror : RL(regs, m->regs - m->ins));
 
 dispatch:;
@@ -1859,15 +1863,15 @@ dispatch:;
         if (!e) dvm_throw("java/lang/NullPointerException", "throw with null exception"); else tl_jni_set_pending(e);
         goto exception;
     }
-    case 0x28: pc += (int8_t)AA; goto dispatch;
-    case 0x29: pc += (int16_t)FETCH(1); goto dispatch;
-    case 0x2a: pc += (int32_t)(FETCH(1) | (uint32_t)FETCH(2) << 16); goto dispatch;
+    case 0x28: pc += (int8_t)AA; tl_gc_gate(); goto dispatch;
+    case 0x29: pc += (int16_t)FETCH(1); tl_gc_gate(); goto dispatch;
+    case 0x2a: pc += (int32_t)(FETCH(1) | (uint32_t)FETCH(2) << 16); tl_gc_gate(); goto dispatch;
     case 0x2b: {                                                   /* packed-switch */
         const uint16_t *p = insns + pc + (int32_t)(FETCH(1) | (uint32_t)FETCH(2) << 16);
         uint16_t size = p[1]; int32_t first = (int32_t)(p[2] | (uint32_t)p[3] << 16);
         int32_t v = RI(regs, AA);
         int64_t i = (int64_t)v - first;
-        if (i >= 0 && i < size) { const uint16_t *t = p + 4 + 2 * i; pc += (int32_t)(t[0] | (uint32_t)t[1] << 16); goto dispatch; }
+        if (i >= 0 && i < size) { const uint16_t *t = p + 4 + 2 * i; pc += (int32_t)(t[0] | (uint32_t)t[1] << 16); tl_gc_gate(); goto dispatch; }
         NEXT(3);
     }
     case 0x2c: {                                                   /* sparse-switch */
@@ -1877,7 +1881,7 @@ dispatch:;
         const uint16_t *keys = p + 2, *tgts = p + 2 + 2 * size;
         for (int i = 0; i < size; i++) {
             int32_t k = (int32_t)(keys[2 * i] | (uint32_t)keys[2 * i + 1] << 16);
-            if (k == v) { pc += (int32_t)(tgts[2 * i] | (uint32_t)tgts[2 * i + 1] << 16); goto dispatch; }
+            if (k == v) { pc += (int32_t)(tgts[2 * i] | (uint32_t)tgts[2 * i + 1] << 16); tl_gc_gate(); goto dispatch; }
             if (k > v) break;
         }
         NEXT(3);
@@ -2137,6 +2141,7 @@ exception: {
             tl_jni_set_pending(NULL);
             caught = e;
             pc = target;
+            tl_gc_gate();
             goto dispatch;
         }
         if ((m->flags & 0x20)) dvm_monitor_exit((m->flags & 8) ? m->cls->jc->mirror : RL(regs, m->regs - m->ins));
@@ -2151,6 +2156,7 @@ done:
 
 static bool hook_attach(tl_jclass *jc)
 {
+    tl_gc_gate();
     if (!strcmp(jc->name, "java/lang/Class")) g_class_class = jc;
     bool ok = attach(jc);
     if (ok && !strcmp(jc->name, "java/lang/String")) g_string_class = jc;
@@ -2201,6 +2207,14 @@ bool tl_dvm_running(void) { return g_running; }
 /* java.boot.class.path: the boot jars, colon-separated, core-oj first (HiddenApiBypass reloads libcore's classes from it). */
 char g_dvm_boot_path[4096];
 
+/* The interpreter's own root set for the collector: the dex string caches and loaders, class mirrors
+ * and static fields, the reflective Method/Constructor caches, the app's loader, the interned strings.
+ * Class state is read straight off jc->dvm: waiting on a link or an init lock here could deadlock with
+ * a thread parked at the gate while holding it. */
+static void (*g_gc_visit)(jobj *);
+static void dvm_gc_visit_class(tl_jclass *jc);
+static void dvm_gc_walk_roots(void (*visit)(jobj *));
+
 bool tl_dvm_start(const char *const *boot, int nboot)
 {
     size_t k = 0;
@@ -2211,6 +2225,8 @@ bool tl_dvm_start(const char *const *boot, int nboot)
     dvm_natives_init();
     tl_dvm = &k_hooks;
     g_running = true;
+    tl_gc_init();
+    tl_gc_set_dvm_roots(dvm_gc_walk_roots);
     /* classes declared before the runtime started (Husk's own Java world): those it has bytecode for become its */
     tl_jni_each_declared(reattach);
     /* The core classes, linked in the order everything else leans on. */
@@ -2261,6 +2277,36 @@ void dvm_set_app_loader(jobj *loader)
     loader->refs = 1u << 30;
     g_app_loader = loader;
     tl_jni_each_declared(loader_for);
+}
+
+static void dvm_gc_visit_class(tl_jclass *jc)
+{
+    if (jc->mirror) g_gc_visit(jc->mirror);
+    if (jc->statics) for (int i = 0; i < jc->nstatics; i++) g_gc_visit((jobj *)jc->statics[i].l);
+    dvm_class *c = (dvm_class *)jc->dvm;
+    if (!c) return;
+    for (int i = 0; i < c->ndm; i++) {
+        if (c->dm[i].proxy_method) g_gc_visit(c->dm[i].proxy_method);
+        if (c->dm[i].proxy_throws) g_gc_visit(c->dm[i].proxy_throws);
+    }
+    for (int i = 0; i < c->nvm; i++) {
+        if (c->vm[i].proxy_method) g_gc_visit(c->vm[i].proxy_method);
+        if (c->vm[i].proxy_throws) g_gc_visit(c->vm[i].proxy_throws);
+    }
+}
+
+static void dvm_gc_walk_roots(void (*visit)(jobj *))
+{
+    g_gc_visit = visit;
+    for (int i = 0; i < g_ndex; i++) {
+        dvm_dex *d = g_dex[i];
+        if (!d) continue;
+        if (d->loader) visit(d->loader);
+        for (uint32_t s = 0; s < d->nstr; s++) if (d->scache[s]) visit(d->scache[s]);
+    }
+    tl_jni_each_declared(dvm_gc_visit_class);
+    if (g_app_loader) visit(g_app_loader);
+    dvm_interns_each(visit);
 }
 
 /* ---- dalvik.system.DexFile: DexClassLoader, InMemoryDexClassLoader and PathClassLoaders made at run time.

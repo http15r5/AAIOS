@@ -68,6 +68,7 @@ extern const tl_dvm_hooks *tl_dvm;
 
 /* Exceptions, for the interpreter. */
 jobj *tl_jni_pending_object(void);
+jobj **tl_jni_pending_slot(void);
 void tl_jni_set_pending(jobj *e);
 
 /* JNI's method/field lookups, for the interpreter's own use of HLE classes. */

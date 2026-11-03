@@ -117,5 +117,6 @@ extern _Thread_local int t_depth;
 /* ---- the natives (husk-tl-dvm-natives.c) */
 dvm_native_fn dvm_intrinsic(const char *cls, const char *name, const char *sig);
 void dvm_natives_init(void);
+void dvm_interns_each(void (*fn)(jobj *o));     /* every interned string, for the collector's roots */
 
 #endif

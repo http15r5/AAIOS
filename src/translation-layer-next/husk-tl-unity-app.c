@@ -5,6 +5,7 @@
 
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <mach/mach.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -99,6 +100,21 @@ static void where(char *out, size_t n, uintptr_t addr)
 
 static struct sigaction g_prev[32];
 
+/* Whether the process maps `p`: a mach region query, which touches no memory. */
+static bool pac_target_mapped(uintptr_t p)
+{
+    if (p < 0x1000) return false;
+    mach_vm_address_t a = (mach_vm_address_t)(p & ~0xfffull);
+    mach_vm_size_t sz = 0;
+    vm_region_basic_info_data_64_t bi;
+    mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t port = MACH_PORT_NULL;
+    if (mach_vm_region(mach_task_self(), &a, &sz, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&bi, &cnt, &port) != KERN_SUCCESS)
+        return false;
+    if (port != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), port);
+    return a <= (mach_vm_address_t)p && (mach_vm_address_t)p < a + sz && (bi.protection & VM_PROT_READ);
+}
+
 /*
  * A fault in guest code ends the process, as it would on Android, but not before the log says where:
  * the guest library and offset of the faulting instruction and of the code that called it. The app's
@@ -148,23 +164,43 @@ static void on_fatal(int sig, siginfo_t *info, void *uctx)
         if (cur_pc == s_last_pac_pc) s_pac_recurs++;
         else { s_last_pac_pc = cur_pc; s_pac_recurs = 1; }
         if (s_pac_recurs <= 3) {
+            /* Stripping the tag is only worth resuming with when what is left is memory the process
+             * actually has: masking with a wide mask left Minecraft running on 0x54f5a5fce7c8 -- 92
+             * TiB of nothing -- until the REST thread dereferenced it and the process died there
+             * instead of at the fault that could have been reported cleanly. */
             bool recovered = false;
-            uintptr_t target_mask = (uintptr_t)info->si_addr & 0x00007fffffffffffull;
+            static const uintptr_t masks[] = {
+                0x00007fffffffffffull,          /* Apple's 47-bit user window */
+                0x000000ffffffffffull,          /* then narrower: heap and file mappings live low */
+                0x00000007ffffffffull,
+                0x00000001ffffffffull,
+            };
             for (int r = 0; r < 29; r++) {
                 uint64_t v = uc->uc_mcontext->__ss.__x[r];
-                if ((v & 0xffff000000000000ull) && ((v & 0x00007fffffffffffull) == target_mask || labs((long)((v & 0x00007fffffffffffull) - target_mask)) < 4096)) {
-                    uc->uc_mcontext->__ss.__x[r] = (v & 0x00007fffffffffffull);
+                if (!(v & 0xffff000000000000ull)) continue;
+                for (size_t mi = 0; mi < sizeof(masks) / sizeof(*masks); mi++) {
+                    uintptr_t cand = (uintptr_t)v & masks[mi];
+                    if (!pac_target_mapped(cand)) continue;
+                    uc->uc_mcontext->__ss.__x[r] = (uint64_t)cand;
                     recovered = true;
+                    break;
                 }
             }
             if (cur_pc & 0xffff000000000000ull) {
-                uc->uc_mcontext->__ss.__pc = cur_pc & 0x00007fffffffffffull;
-                recovered = true;
+                for (size_t mi = 0; mi < sizeof(masks) / sizeof(*masks); mi++) {
+                    uintptr_t cand = cur_pc & masks[mi];
+                    if (!pac_target_mapped(cand)) continue;
+                    uc->uc_mcontext->__ss.__pc = (uint64_t)cand;
+                    recovered = true;
+                    break;
+                }
             }
             if (recovered) {
                 tl_log_line("ld: recovered from PAC / signed pointer fault at %p (pc %p)", info->si_addr, (void *)cur_pc);
                 return;
             }
+            /* nothing in the registers masks to mapped memory: this is a corrupted pointer, not a signed
+             * one -- report the crash here, with its frames, rather than resuming on garbage */
         }
     }
     char tn[40] = "", a[200], b[200], c[200];
@@ -237,6 +273,11 @@ static void *heartbeat_thread(void *arg)
         tl_log_line("unity: alive: %lu frames (+%lu)", f, f - last);
 #endif
         last = f;
+        /* the java heap's collector: when the phone reports little memory left, take a pass over it. TikTok and exteraGram
+         * died of jetsam with everything they had ever allocated still on the heap -- nothing freed it. */
+#if TARGET_OS_IPHONE
+        if (tl_dvm_running()) tl_gc_maybe(os_proc_available_memory());
+#endif
         { extern volatile struct { uint64_t count, x21, impl, mask; } tl_va_clobber;
           static uint64_t seen;
           if (tl_va_clobber.count != seen) {
