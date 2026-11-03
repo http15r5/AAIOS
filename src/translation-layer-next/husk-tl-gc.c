@@ -249,15 +249,12 @@ static void scan_mach_threads(wl *w)
     if (task_threads(mach_task_self(), &threads, &n) != KERN_SUCCESS) return;
     for (unsigned i = 0; i < n; i++) {
         pthread_t p = pthread_from_mach_thread_np(threads[i]);
-        void *base = NULL;
-        size_t size = 0;
+        uintptr_t lo = 0, hi = 0;
         uintptr_t sp = 0;
         if (p) {
-            pthread_attr_t attr;
-            if (pthread_getattr_np(p, &attr) == 0) {
-                pthread_attr_getstack(&attr, &base, &size);
-                pthread_attr_destroy(&attr);
-            }
+            /* Darwin names the stack range differently from Linux: the stack address is the high end, and it grows down */
+            hi = (uintptr_t)pthread_get_stackaddr_np(p);
+            lo = hi - pthread_get_stacksize_np(p);
 #if defined(__aarch64__)
             arm_thread_state64_t st;
             mach_msg_type_number_t cnt = ARM_THREAD_STATE64_COUNT;
@@ -267,8 +264,7 @@ static void scan_mach_threads(wl *w)
             }
 #endif
         }
-        if (base && size) {
-            uintptr_t lo = (uintptr_t)base, hi = lo + size;
+        if (hi > lo) {
             if (sp >= lo && sp < hi) lo = sp & ~(uintptr_t)7;
             scan_range(w, lo, hi);
         }
