@@ -174,7 +174,11 @@ static void mark_obj(wl *w, jobj *o)
 }
 
 /* Whether a word can be an object pointer, without ever dereferencing it first: malloc zones give
- * the range test. What passes is malloc'd memory, so reading its header afterwards is safe. */
+ * the range test. What passes is malloc'd memory, so reading its header afterwards is safe -- and
+ * every pointer read along the way gets the same test before it is dereferenced in turn. That last
+ * step is what the first version missed: a garbage block can imitate an object up to its class's
+ * name field, and dereferencing the garbage name (a text value like "X/00ua" that is no mapping at
+ * all) is what killed the heartbeat thread on TikTok and exteraGram. */
 static bool looks_like_object(uintptr_t p)
 {
     if ((p & 7) || p < 0x100000ull || p > 0x0080000000000000ull) return false;
@@ -185,7 +189,7 @@ static bool looks_like_object(uintptr_t p)
     tl_jclass *c = o->cls;
     if ((uintptr_t)c < 0x100000ull || ((uintptr_t)c & 7)) return false;
     if (!malloc_zone_from_ptr(c)) return false;
-    if (!c->name) return false;
+    if (!c->name || !malloc_zone_from_ptr(c->name)) return false;
     unsigned char c0 = (unsigned char)c->name[0];
     return (c0 > 0x20 && c0 < 0x7f) || (c0 >= 0xc2 && c0 <= 0xf4);      /* a class name's first byte: ASCII or a UTF-8 lead */
 }
@@ -211,16 +215,28 @@ static void scan_native_block(wl *w, void *block, int depth)
     }
 }
 
+/* The same discipline as looks_like_object, one level deeper: a marked object's own header is
+ * trusted (it was validated to get marked), but its arrays are dereferenced only after a zone test,
+ * and bounded by what the allocation actually holds -- a garbage length would otherwise walk past
+ * the array into whatever follows. */
 static void mark_from_roots(wl *w)
 {
     while (w->n && !w->oom) {
         jobj *o = w->v[--w->n];
         if (o->kind == TL_K_OBJ_ARRAY) {
             jobj **v = o->oarr.v;
-            for (uint32_t i = 0; i < o->oarr.len; i++) mark_word(w, (uintptr_t)v[i]);
-        } else if (o->fields) {
+            uint32_t len = o->oarr.len;
+            if (v && malloc_zone_from_ptr(v)) {
+                size_t cap = malloc_size(v) / sizeof(jobj *);
+                if (len > cap) len = (uint32_t)cap;
+                for (uint32_t i = 0; i < len; i++) mark_word(w, (uintptr_t)v[i]);
+            }
+        } else if (o->fields && malloc_zone_from_ptr(o->fields)) {
             jvalue *f = o->fields;
-            for (uint32_t i = 0; i < o->nfields; i++) mark_word(w, (uintptr_t)f[i].l);
+            uint32_t n = o->nfields;
+            size_t cap = malloc_size(f) / sizeof(jvalue);
+            if (n > cap) n = (uint32_t)cap;
+            for (uint32_t i = 0; i < n; i++) mark_word(w, (uintptr_t)f[i].l);
         }
         if (o->native) scan_native_block(w, o->native, 1);
     }
