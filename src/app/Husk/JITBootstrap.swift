@@ -10,7 +10,7 @@ private func csops(_ pid: Int32, _ ops: Int32,
                    _ useraddr: UnsafeMutableRawPointer?, _ usersize: Int) -> Int32
 
 @_silgen_name("husk_prepare_compressed_heap")
-private func prepareCompressedHeap()
+func prepareCompressedHeap()
 @_silgen_name("husk_release_unused_compressed_heap")
 private func releaseUnusedCompressedHeap()
 

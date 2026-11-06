@@ -218,6 +218,11 @@ static int b_connect(int fd, const void *g, socklen_t glen)
     socklen_t n = sa_to_darwin(g, glen, &s);
     if (!n) { tl_set_guest_errno(G_EAFNOSUPPORT); return -1; }
     TL_ERRNO_BEGIN(); int r = connect(fd, (struct sockaddr *)&s, n); int e = errno; TL_ERRNO_END();
+    if (r < 0 && e != EINPROGRESS && e != EALREADY && (s.ss_family == AF_INET || s.ss_family == AF_INET6)) {
+        static unsigned errors;
+        if (__atomic_fetch_add(&errors, 1, __ATOMIC_RELAXED) < 16)
+            tl_log_line("net: TCP/IP connect failed (family %d, guest errno %d)", s.ss_family, tl_errno_to_guest(e));
+    }
     { char ip[64] = "?"; if (s.ss_family == AF_INET) inet_ntop(AF_INET, &((struct sockaddr_in *)&s)->sin_addr, ip, sizeof(ip)); NTRACE("connect(fd %d, %s) -> %d errno %d", fd, ip, r, e); }
     return r;
 }

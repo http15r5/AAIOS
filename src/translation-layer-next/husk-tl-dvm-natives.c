@@ -33,6 +33,14 @@ static bool npe(const char *what) { return dvm_throw("java/lang/NullPointerExcep
 
 /* ================================================================== Object */
 
+NAT(Class_isInstance) {
+    *ret = Z(self && self->kind == TL_K_CLASS && dvm_instance_of(a[0].l, self->klass.jc));
+    return true;
+}
+NAT(LocalServer_unavailable) {
+    (void)self; (void)a; (void)ret;
+    return dvm_throw("java/io/IOException", "LocalServerSocket listener unavailable");
+}
 NAT(Object_getClass) { (void)a; *ret = L(dvm_object_class(self)->mirror); return true; }
 NAT(Object_identityHashCode) { (void)self; *ret = I(a[0].l ? (int32_t)(((uintptr_t)a[0].l >> 4) * 2654435761u) : 0); return true; }
 NAT(Object_internalClone)
@@ -2030,6 +2038,7 @@ NAT(VMCL_bootEntries) { UNUSED; const char *v[64]; int n = tl_dvm_class_path(v, 
 
 typedef struct { const char *cls, *name, *sig; dvm_native_fn fn; } entry;
 static const entry k_natives[] = {
+    { "java/lang/Class", "isInstance", "(Ljava/lang/Object;)Z", Class_isInstance },
     { "java/lang/Object", "getClass", "()Ljava/lang/Class;", Object_getClass },
     { "java/lang/Object", "identityHashCodeNative", "(Ljava/lang/Object;)I", Object_identityHashCode },
     { "java/lang/Object", "internalClone", "()Ljava/lang/Object;", Object_internalClone },
@@ -2377,6 +2386,11 @@ NAT(System_load)
 
 dvm_native_fn dvm_fast_path(const char *cls, const char *name, const char *sig)
 {
+    if (!strcmp(cls, "java/lang/Class") && !strcmp(name, "isInstance") && !strcmp(sig, "(Ljava/lang/Object;)Z")) return Class_isInstance;
+    /* The bundled framework has no listening socket behind these constructors.
+     * Fail at bind, before callers start spawning workers for null accepts. */
+    if (!strcmp(cls, "android/net/LocalServerSocket") && !strcmp(name, "<init>") &&
+        (!strcmp(sig, "(Ljava/lang/String;)V") || !strcmp(sig, "(Ljava/io/FileDescriptor;)V"))) return LocalServer_unavailable;
     if (!strcmp(cls, "java/lang/Object") && !strcmp(name, "getClass") && !strcmp(sig, "()Ljava/lang/Class;")) return Object_getClass;
     if (!strcmp(cls, "java/lang/System") && !strcmp(name, "loadLibrary") && !strcmp(sig, "(Ljava/lang/String;)V")) return System_loadLibrary;
     if (!strcmp(cls, "java/lang/System") && !strcmp(name, "load") && !strcmp(sig, "(Ljava/lang/String;)V")) return System_load;

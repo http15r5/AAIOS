@@ -108,6 +108,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
             TLUnityUIView.cocosView = self
             TLUnityUIView.installSDLKeyboardHandler()
         } else if engine == .minecraft {
+            prepareCompressedHeap()
             TLUnityUIView.cocosView = self
             TLUnityUIView.installGameActivityKeyboardHandler()
         } else if engine == .java {

@@ -470,7 +470,10 @@ void tl_gc_maybe(size_t avail_bytes)
     }
     if (atomic_load(&g_disabled) || !tl_dvm) return;
     uint64_t adds = atomic_load(&g_candidate_adds);
-    bool followup = atomic_load(&g_pending_doom) != 0;
+    size_t pending = atomic_load(&g_pending_doom);
+    /* At comfortable headroom, small new batches left by a sweep should not
+     * chain full-heap scans forever. Under pressure revisit even one candidate. */
+    bool followup = pending && (avail_bytes <= k_trigger_bytes || pending >= 250000);
     if (!avail_bytes || avail_bytes > (1800ull << 20)) return;
     if (avail_bytes > k_trigger_bytes && !followup && adds < 500000) return;
     uint64_t now = now_ms();
