@@ -93,10 +93,18 @@ enum HuskLog {
     /// could retrieve. Replaying it here puts it in husk.log, which is the file
     /// people already know how to send.
     private static func replayPreviousNativeLog() {
-        guard let data = try? Data(contentsOf: previousNativeLogURL),
-              !data.isEmpty,
-              let text = String(data: data.suffix(8 * 1024), encoding: .utf8)
-        else { return }
+        guard let file = try? FileHandle(forReadingFrom: previousNativeLogURL) else { return }
+        defer { try? file.close() }
+        let text: String
+        do {
+            let end = try file.seekToEnd()
+            let length = min(end, 8 * 1024)
+            try file.seek(toOffset: end - length)
+            guard let tail = try file.read(upToCount: Int(length)), !tail.isEmpty else { return }
+            text = String(decoding: tail, as: UTF8.self)
+        } catch {
+            return
+        }
 
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).suffix(40)
         guard !lines.isEmpty else { return }

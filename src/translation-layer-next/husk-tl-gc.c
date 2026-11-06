@@ -284,6 +284,7 @@ static void scan_mach_threads(wl *w)
             if (sp >= lo && sp < hi) lo = sp & ~(uintptr_t)7;
             scan_range(w, lo, hi);
         }
+        mach_port_deallocate(mach_task_self(), threads[i]);
     }
     vm_deallocate(mach_task_self(), (vm_address_t)threads, (vm_size_t)n * sizeof(*threads));
 }
