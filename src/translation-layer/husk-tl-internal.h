@@ -75,6 +75,7 @@ typedef struct tl_zip_entry {
     char    *name;
     uint16_t method;        /* 0 stored, 8 deflated */
     uint16_t flags;
+    uint32_t crc32;
     uint64_t csize;
     uint64_t usize;
     uint64_t local_offset;

@@ -152,7 +152,7 @@ void tl_gc_unregister_candidate(jobj *o)
 
 /* ------------------------------------------------------------- marking */
 
-typedef struct { jobj **v; size_t n, cap; bool oom; } wl;
+typedef struct { jobj **v, **registered; size_t n, cap, slots; bool oom; } wl;
 
 static void wl_push(wl *w, jobj *o)
 {
@@ -173,30 +173,42 @@ static void mark_obj(wl *w, jobj *o)
     wl_push(w, o);
 }
 
-/* Whether a word can be an object pointer, without ever dereferencing it first: malloc zones give
- * the range test. What passes is malloc'd memory, so reading its header afterwards is safe -- and
- * every pointer read along the way gets the same test before it is dereferenced in turn. That last
- * step is what the first version missed: a garbage block can imitate an object up to its class's
- * name field, and dereferencing the garbage name (a text value like "X/00ua" that is no mapping at
- * all) is what killed the heartbeat thread on TikTok and exteraGram. */
-static bool looks_like_object(uintptr_t p)
+/* Conservative roots include native pointers and arbitrary integers. Only an exact
+ * address from the guest allocation registry may be dereferenced or marked. */
+static size_t object_slot(const wl *w, uintptr_t address)
 {
-    if ((p & 7) || p < 0x100000ull || p > 0x0080000000000000ull) return false;
-    if (!malloc_zone_from_ptr((void *)p)) return false;
-    jobj *o = (jobj *)p;
-    if (o->kind > TL_K_OBJ_ARRAY) return false;
-    if (o->kind == TL_K_CLASS) return (uintptr_t)o->klass.jc >= 0x1000ull && !((uintptr_t)o->klass.jc & 7);
-    tl_jclass *c = o->cls;
-    if ((uintptr_t)c < 0x100000ull || ((uintptr_t)c & 7)) return false;
-    if (!malloc_zone_from_ptr(c)) return false;
-    if (!c->name || !malloc_zone_from_ptr(c->name)) return false;
-    unsigned char c0 = (unsigned char)c->name[0];
-    return (c0 > 0x20 && c0 < 0x7f) || (c0 >= 0xc2 && c0 <= 0xf4);      /* a class name's first byte: ASCII or a UTF-8 lead */
+    uint64_t hash = (address >> 3) * UINT64_C(11400714819323198485);
+    return (size_t)(hash ^ (hash >> 32)) & (w->slots - 1);
+}
+
+static void snapshot_objects(wl *w)
+{
+    pthread_mutex_lock(&g_cand_mu);
+    size_t count = 0;
+    for (jobj *o = g_candidates; o; o = o->gc_next) count++;
+    w->slots = 16;
+    while (w->slots / 2 < count) w->slots *= 2;
+    w->registered = calloc(w->slots, sizeof(*w->registered));
+    if (!w->registered) w->oom = true;
+    else for (jobj *o = g_candidates; o; o = o->gc_next) {
+        size_t i = object_slot(w, (uintptr_t)o);
+        while (w->registered[i]) i = (i + 1) & (w->slots - 1);
+        w->registered[i] = o;
+    }
+    pthread_mutex_unlock(&g_cand_mu);
 }
 
 static void mark_word(wl *w, uintptr_t word)
 {
-    if (looks_like_object(word)) mark_obj(w, (jobj *)word);
+    if (!word || (word & 7) || w->oom) return;
+    size_t i = object_slot(w, word);
+    while (w->registered[i]) {
+        if ((uintptr_t)w->registered[i] == word) {
+            mark_obj(w, w->registered[i]);
+            return;
+        }
+        i = (i + 1) & (w->slots - 1);
+    }
 }
 
 /* A live object's native state, if it has one: structures like an HTTP header map or an ArrayList
@@ -215,7 +227,7 @@ static void scan_native_block(wl *w, void *block, int depth)
     }
 }
 
-/* The same discipline as looks_like_object, one level deeper: a marked object's own header is
+/* When scanning a registered object: a marked object's own header is
  * trusted (it was validated to get marked), but its arrays are dereferenced only after a zone test,
  * and bounded by what the allocation actually holds -- a garbage length would otherwise walk past
  * the array into whatever follows. */
@@ -312,7 +324,7 @@ void tl_gc_set_dvm_roots(void (*walk)(void (*visit)(jobj *))) { g_dvm_roots = wa
 
 static void visit_root(jobj *o)                     /* the walker hands raw slot values: validated before marking */
 {
-    if (g_mark && looks_like_object((uintptr_t)o)) mark_obj(g_mark, o);
+    if (g_mark) mark_word(g_mark, (uintptr_t)o);
 }
 
 /* ------------------------------------------------------------ the sweep */
@@ -390,6 +402,7 @@ void tl_gc_collect_now(const char *why)
     usleep(150 * 1000);
 
     wl w = {0};
+    snapshot_objects(&w);
     g_mark = &w;
 
     /* each registered thread's pending exception -- read under the lock, so a thread that exits
@@ -404,18 +417,26 @@ void tl_gc_collect_now(const char *why)
 
     /* native-held objects are roots: an unmarked one is not garbage while its refs say otherwise,
      * and its fields and native state must keep their referents alive */
-    for (jobj *o = g_candidates; o && !w.oom; o = o->gc_next)
-        if (o->refs) mark_obj(&w, o);
+    for (size_t i = 0; i < w.slots && !w.oom; i++) {
+        jobj *o = w.registered[i];
+        if (o && __atomic_load_n(&o->refs, __ATOMIC_RELAXED)) mark_obj(&w, o);
+    }
 
-    scan_mach_threads(&w);
+    if (!w.oom) scan_mach_threads(&w);
     if (!w.oom) scan_host_data(&w);
     if (!w.oom && g_dvm_roots) g_dvm_roots(visit_root);
 
     if (!w.oom) mark_from_roots(&w);
 
     size_t freed = 0, kept = 0;
-    if (w.oom) tl_log_line("gc: %s: the mark stack ran out of memory, this round only scanned", why);
+    if (w.oom) {
+        /* An incomplete traversal must leave no marks for the next pass. */
+        if (w.registered) for (size_t i = 0; i < w.slots; i++)
+            if (w.registered[i]) w.registered[i]->gc_mark = 0;
+        tl_log_line("gc: %s: incomplete mark pass, skipping sweep", why);
+    }
     else freed = sweep(epoch, &kept);
+    free(w.registered);
     free(w.v);
     g_mark = NULL;
 

@@ -214,6 +214,7 @@ bool tl_zip_open(tl_zip *z, const char *path, char *err, size_t errlen)
         tl_zip_entry *en = &z->entries[z->count];
         en->flags = rd16(c + 8);
         en->method = rd16(c + 10);
+        en->crc32 = rd32(c + 16);
         en->csize = rd32(c + 20);
         en->usize = rd32(c + 24);
         en->local_offset = rd32(c + 42);

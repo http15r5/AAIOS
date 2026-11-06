@@ -1091,7 +1091,7 @@ const tl_bionic_entry tl_tab_ndk[] = {
     TL_DIRECT(deflate), TL_DIRECT(deflateEnd), TL_DIRECT(deflateInit2_), TL_DIRECT(deflateInit_),
     TL_DIRECT(inflate), TL_DIRECT(inflateEnd), TL_DIRECT(inflateInit2_), TL_DIRECT(inflateInit_), TL_DIRECT(zError),
     TL_DIRECT(compressBound), TL_DIRECT(zlibVersion), TL_DIRECT(compress), TL_DIRECT(compress2), TL_DIRECT(uncompress), TL_DIRECT(crc32), TL_DIRECT(adler32),
-    TL_DIRECT(inflateReset), TL_DIRECT(inflateReset2), TL_DIRECT(deflateReset), TL_DIRECT(inflateSync), TL_DIRECT(deflateParams), TL_DIRECT(deflateSetDictionary), TL_DIRECT(inflateSetDictionary),
+    TL_DIRECT(inflateReset), TL_DIRECT(inflateReset2), TL_DIRECT(deflateReset), TL_DIRECT(inflateSync), TL_DIRECT(deflateParams), TL_DIRECT(deflateSetHeader), TL_DIRECT(zlibCompileFlags), TL_DIRECT(deflateSetDictionary), TL_DIRECT(inflateSetDictionary),
     TL_DIRECT(gzopen), TL_DIRECT(gzclose), TL_DIRECT(gzread), TL_DIRECT(gzwrite),
     TL_DIRECT(gzdopen), TL_DIRECT(gzseek), TL_DIRECT(gztell), TL_DIRECT(gzerror),
     TL_DIRECT(gzrewind), TL_DIRECT(gzflush), TL_DIRECT(gzputs), TL_DIRECT(gzgets),
