@@ -663,7 +663,7 @@ NAT(VMR_classPath) { UNUSED; *ret = L(dvm_new_string_utf8("")); return true; }
 
 /* ================================================================== Thread */
 
-static _Thread_local jobj *t_thread;
+static _Thread_local jobj *t_unkeyed_thread;
 /* TLS is outside the stacks scanned by the guest collector. Own a native
  * reference from attachment until Darwin tears down this pthread. */
 static pthread_key_t g_thread_root;
@@ -684,13 +684,16 @@ static bool attach_thread_root(jobj *owned)
 {
     pthread_once(&g_thread_root_once, make_thread_root_key);
     if (g_thread_root_error || pthread_setspecific(g_thread_root, owned)) return false;
-    t_thread = owned;
+
     return true;
 }
 
 jobj *dvm_current_thread(void)
 {
-    if (t_thread) return t_thread;
+    pthread_once(&g_thread_root_once, make_thread_root_key);
+    jobj *current = g_thread_root_error ? NULL : pthread_getspecific(g_thread_root);
+    if (current) return current;
+    if (t_unkeyed_thread) return t_unkeyed_thread;
     /* A thread Java has not seen (the main thread, a native thread calling in): a Thread for it, in the main group, as ART
      * makes when it attaches one. */
     tl_jclass *tc = dvm_class_named("java/lang/Thread");
@@ -742,7 +745,7 @@ static dvm_field *thread_peer(jobj *t)
 NAT(Thread_status)
 {
     dvm_field *f = thread_peer(self);
-    bool alive = self == t_thread || (f && dvm_slots(self)[f->slot].j != 0);
+    bool alive = self == dvm_current_thread() || (f && dvm_slots(self)[f->slot].j != 0);
     *ret = I(alive ? 1 : a[0].z ? 5 : 0);
     return true;
 }
@@ -852,7 +855,7 @@ static void *thread_main(void *p)
     /* The parent passed a retained reference. If a TLS key is unavailable,
      * keep that reference until the normal thread exit below. */
     bool keyed = attach_thread_root(t);
-    if (!keyed) t_thread = t;
+    if (!keyed) t_unkeyed_thread = t;
     jvalue nm; dvm_class *c = dvm_class_of(dvm_object_class(t));
     dvm_field *nf = c ? dvm_find_field(c, "name", false) : NULL;
     if (nf && t->fields) { nm = t->fields[nf->slot]; const char *n = tl_jni_string(nm.l); if (n && n[0]) pthread_setname_np(n); else pthread_setname_np("dvm-worker"); }
@@ -893,7 +896,7 @@ static void *thread_main(void *p)
     if (!lf) { dvm_class *tc = dvm_class_of(dvm_class_named("java/lang/Thread")); lf = tc ? dvm_find_field(tc, "lock", false) : NULL; }
     jobj *lk = lf ? dvm_slots(t)[lf->slot].l : NULL;
     if (lk) { dvm_monitor_enter(lk); dvm_monitor_notify(lk, true); dvm_monitor_exit(lk); }
-    if (!keyed) { t_thread = NULL; tl_jni_unref(t); }
+    if (!keyed) { t_unkeyed_thread = NULL; tl_jni_unref(t); }
     return NULL;
 }
 NAT(Thread_nativeCreate)

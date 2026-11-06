@@ -423,18 +423,49 @@ static int b_once(_Atomic int *once, void (*fn)(void))
     return 0;
 }
 
-/* bionic's pthread_key_t is an int; Darwin's is an unsigned long. */
+/* Guest key values must never index Darwin's private TLS keys. */
+static pthread_mutex_t g_key_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct { pthread_key_t host; bool used; } g_guest_keys[128];
+
 static int b_key_create(int *key, void (*dtor)(void *))
 {
-    pthread_key_t k;
-    int r = pthread_key_create(&k, dtor);
-    if (r) return rc(r);
-    *key = (int)k;
-    return 0;
+    pthread_mutex_lock(&g_key_lock);
+    int result = 11; /* EAGAIN */
+    for (unsigned i = 0; i < sizeof(g_guest_keys) / sizeof(g_guest_keys[0]); i++) {
+        if (g_guest_keys[i].used) continue;
+        result = rc(pthread_key_create(&g_guest_keys[i].host, dtor));
+        if (!result) { g_guest_keys[i].used = true; *key = (int)i; }
+        break;
+    }
+    pthread_mutex_unlock(&g_key_lock);
+    return result;
 }
-static int b_key_delete(int key) { return rc(pthread_key_delete((pthread_key_t)key)); }
-static void *b_getspecific(int key) { return pthread_getspecific((pthread_key_t)key); }
-static int b_setspecific(int key, const void *v) { return rc(pthread_setspecific((pthread_key_t)key, v)); }
+static bool valid_guest_key(int key)
+{
+    return (unsigned)key < sizeof(g_guest_keys) / sizeof(g_guest_keys[0]) && g_guest_keys[key].used;
+}
+static int b_key_delete(int key)
+{
+    pthread_mutex_lock(&g_key_lock);
+    int r = valid_guest_key(key) ? rc(pthread_key_delete(g_guest_keys[key].host)) : 22;
+    if (!r) g_guest_keys[key].used = false;
+    pthread_mutex_unlock(&g_key_lock);
+    return r;
+}
+static void *b_getspecific(int key)
+{
+    pthread_mutex_lock(&g_key_lock);
+    void *v = valid_guest_key(key) ? pthread_getspecific(g_guest_keys[key].host) : NULL;
+    pthread_mutex_unlock(&g_key_lock);
+    return v;
+}
+static int b_setspecific(int key, const void *v)
+{
+    pthread_mutex_lock(&g_key_lock);
+    int r = valid_guest_key(key) ? rc(pthread_setspecific(g_guest_keys[key].host, v)) : 22;
+    pthread_mutex_unlock(&g_key_lock);
+    return r;
+}
 
 /* ---------------------------------------------------------------- threads */
 

@@ -418,7 +418,7 @@ static void *launch_thread(void *arg)
     tl_hle_set_ca_bundle(A.ca);
     /* Release the 4 GiB unused compressed heap reservation so all engines (Minecraft PE, etc.) have address space to map their APKs */
     extern void husk_release_unused_compressed_heap(void);
-    husk_release_unused_compressed_heap();
+    if (A.engine != ENGINE_GAMEACTIVITY) husk_release_unused_compressed_heap();
 
     /* Controllers go to the engine that is running. (GameActivity registers its own as it starts.) */
     if (A.engine == ENGINE_UNITY) tl_unity_register_pad_sink();
