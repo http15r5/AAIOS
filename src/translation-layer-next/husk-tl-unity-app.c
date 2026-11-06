@@ -79,9 +79,11 @@ static struct {
 
 /* -------------------------------------------------------------- crash report */
 
+typedef struct { uintptr_t addr; const char *name; uintptr_t off; } crash_site;
+
 static int find_lib(uintptr_t bias, const char *name, const void *phdr, unsigned phnum, void *user)
 {
-    struct { uintptr_t addr; const char *name; uintptr_t off; } *r = user;
+    crash_site *r = user;
     const struct { uint32_t type, flags; uint64_t off, vaddr, paddr, filesz, memsz, align; } *p = phdr;
     for (unsigned i = 0; i < phnum; i++)
         if (p[i].type == 1 && r->addr >= bias + p[i].vaddr && r->addr < bias + p[i].vaddr + p[i].memsz) {
@@ -93,7 +95,7 @@ static int find_lib(uintptr_t bias, const char *name, const void *phdr, unsigned
 
 static void where(char *out, size_t n, uintptr_t addr)
 {
-    struct { uintptr_t addr; const char *name; uintptr_t off; } r = { addr, NULL, 0 };
+    crash_site r = { addr, NULL, 0 };
     tl_ld_iterate(find_lib, &r);
     if (r.name) snprintf(out, n, "%s+%#lx", r.name, (unsigned long)r.off);
     else snprintf(out, n, "%#lx", (unsigned long)addr);
@@ -127,6 +129,26 @@ static void on_fatal(int sig, siginfo_t *info, void *uctx)
     ucontext_t *uc = uctx;
     char tn_fatal[40] = "";
     pthread_getname_np(pthread_self(), tn_fatal, sizeof(tn_fatal));
+    /* Bedrock 1.26.52.3: a corrupt chain link in the Gameface resource
+     * dictionary. The lookup already has a miss path that clears its three
+     * result fields. Match the faulting operand and the APK instructions
+     * before resuming there; no guest dictionary contents are changed. */
+    if (sig == SIGSEGV && uc && !strcmp(tn_fatal, "Gameface Resource Thread")) {
+        uintptr_t pc = (uintptr_t)uc->uc_mcontext->__ss.__pc;
+        uintptr_t node = uc->uc_mcontext->__ss.__x[23];
+        if ((node >> 56) && (uintptr_t)info->si_addr == node + 8) {
+            crash_site site = {pc, NULL, 0};
+            tl_ld_iterate(find_lib, &site);
+            if (site.off == 0x6b375d0 && site.name && !strcmp(site.name, "libminecraftpe.so")) {
+                const uint32_t *insn = (const uint32_t *)pc;
+                if (insn[-2] == 0xb4000117 && insn[0] == 0xf94006e1 &&
+                    insn[6] == 0xa9007e7f && insn[7] == 0xf9000a7f) {
+                    uc->uc_mcontext->__ss.__pc = pc + 6 * sizeof(*insn);
+                    return;
+                }
+            }
+        }
+    }
     if ((sig == SIGABRT || sig == SIGBUS || sig == SIGSEGV) &&
         (!strncmp(tn_fatal, "Streaming Pool", 14) || strstr(tn_fatal, "Pool") ||
          strstr(tn_fatal, "Worker") || strstr(tn_fatal, "Async") ||

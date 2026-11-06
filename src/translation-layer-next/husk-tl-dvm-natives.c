@@ -664,7 +664,29 @@ NAT(VMR_classPath) { UNUSED; *ret = L(dvm_new_string_utf8("")); return true; }
 /* ================================================================== Thread */
 
 static _Thread_local jobj *t_thread;
-static pthread_mutex_t g_tid_lock = PTHREAD_MUTEX_INITIALIZER;
+/* TLS is outside the stacks scanned by the guest collector. Own a native
+ * reference from attachment until Darwin tears down this pthread. */
+static pthread_key_t g_thread_root;
+static pthread_once_t g_thread_root_once = PTHREAD_ONCE_INIT;
+static int g_thread_root_error;
+
+static void release_thread_root(void *thread)
+{
+    tl_jni_unref(thread);
+}
+
+static void make_thread_root_key(void)
+{
+    g_thread_root_error = pthread_key_create(&g_thread_root, release_thread_root);
+}
+
+static bool attach_thread_root(jobj *owned)
+{
+    pthread_once(&g_thread_root_once, make_thread_root_key);
+    if (g_thread_root_error || pthread_setspecific(g_thread_root, owned)) return false;
+    t_thread = owned;
+    return true;
+}
 
 jobj *dvm_current_thread(void)
 {
@@ -677,9 +699,11 @@ jobj *dvm_current_thread(void)
     jobj *t = dvm_new_object(tc);
     if (!t) return NULL;
     dvm_slots(t);
-    t_thread = t;
-    pthread_mutex_lock(&g_tid_lock);
-    pthread_mutex_unlock(&g_tid_lock);
+    if (!attach_thread_root(tl_jni_ref(t))) {
+        tl_jni_unref(t);
+        dvm_throw("java/lang/OutOfMemoryError", "attaching native thread");
+        return NULL;
+    }
     dvm_class *tg = dvm_class_of(dvm_class_named("java/lang/ThreadGroup"));
     jobj *group = NULL;
     if (tg && dvm_ensure_init(tg)) {
@@ -825,7 +849,10 @@ static void *thread_main(void *p)
     jobj *t = s->thread;
     free(s);
     if (!t || (uintptr_t)t < 0x100000ull) return NULL;
-    t_thread = t;
+    /* The parent passed a retained reference. If a TLS key is unavailable,
+     * keep that reference until the normal thread exit below. */
+    bool keyed = attach_thread_root(t);
+    if (!keyed) t_thread = t;
     jvalue nm; dvm_class *c = dvm_class_of(dvm_object_class(t));
     dvm_field *nf = c ? dvm_find_field(c, "name", false) : NULL;
     if (nf && t->fields) { nm = t->fields[nf->slot]; const char *n = tl_jni_string(nm.l); if (n && n[0]) pthread_setname_np(n); else pthread_setname_np("dvm-worker"); }
@@ -866,6 +893,7 @@ static void *thread_main(void *p)
     if (!lf) { dvm_class *tc = dvm_class_of(dvm_class_named("java/lang/Thread")); lf = tc ? dvm_find_field(tc, "lock", false) : NULL; }
     jobj *lk = lf ? dvm_slots(t)[lf->slot].l : NULL;
     if (lk) { dvm_monitor_enter(lk); dvm_monitor_notify(lk, true); dvm_monitor_exit(lk); }
+    if (!keyed) { t_thread = NULL; tl_jni_unref(t); }
     return NULL;
 }
 NAT(Thread_nativeCreate)
@@ -884,7 +912,7 @@ NAT(Thread_nativeCreate)
 
     start_arg *s = malloc(sizeof(*s));
     if (!s) return dvm_throw("java/lang/OutOfMemoryError", "nativeCreate");
-    s->thread = th_obj;
+    s->thread = tl_jni_ref(th_obj);
     dvm_field *pf = thread_peer(th_obj);
     if (pf) dvm_slots(th_obj)[pf->slot].j = (int64_t)(uintptr_t)th_obj;     /* alive from here (before it runs: start() then isAlive() is true) */
     pthread_attr_t at; pthread_attr_init(&at);
@@ -908,7 +936,12 @@ NAT(Thread_nativeCreate)
         r = pthread_create(&th, &at, thread_main, s);
     }
     pthread_attr_destroy(&at);
-    if (r != 0) { free(s); return dvm_throw("java/lang/OutOfMemoryError", "pthread_create"); }
+    if (r != 0) {
+        if (pf) dvm_slots(th_obj)[pf->slot].j = 0;
+        tl_jni_unref(th_obj);
+        free(s);
+        return dvm_throw("java/lang/OutOfMemoryError", "pthread_create");
+    }
     return true;
 }
 
