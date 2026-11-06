@@ -360,12 +360,11 @@ static int b_epoll_ctl(int epfd, int op, int fd, const guest_epoll_event *ev)
         return 0;
     }
     if (!ev) { tl_set_guest_errno(14 /* EFAULT */); return -1; }
-    /* For EVFILT_READ, do NOT set EV_CLEAR so Darwin kqueue remains level-triggered on sockets.
-     * When Telegram/MTProto or any network client reads a partial packet batch, level-triggered
-     * reading ensures subsequent kevent/epoll_wait calls continue to deliver EPOLLIN until the
-     * socket buffer is completely drained, preventing chat load freezes. */
-    uint16_t rflags = EV_ADD | EV_ENABLE | ((ev->events & EPOLLONESHOT) ? EV_ONESHOT : 0);
-    uint16_t wflags = EV_ADD | EV_ENABLE | ((ev->events & EPOLLET) ? EV_CLEAR : 0) | ((ev->events & EPOLLONESHOT) ? EV_ONESHOT : 0);
+    /* Honor the guest socket watch on both filters. An edge-triggered client
+     * can otherwise repeatedly wake on a readable descriptor while idle. */
+    uint16_t rflags = EV_ADD | EV_ENABLE | ((ev->events & EPOLLET) ? EV_CLEAR : 0) |
+                      ((ev->events & EPOLLONESHOT) ? EV_ONESHOT : 0);
+    uint16_t wflags = rflags;
     void *udata = (void *)(uintptr_t)ev->data;
 
     struct kevent k[4];

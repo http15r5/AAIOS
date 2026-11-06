@@ -1516,6 +1516,18 @@ static void patch_image(tl_lib *L, size_t *n_tpidr, size_t *n_adrp, size_t *n_ad
             if (dbg < 0) { const char *e = getenv("TL_X18_RANGE"); dbg = getenv("TL_X18_OFF") ? 1 : 0; if (e) { dbg = 2; sscanf(e, "%llx-%llx", (unsigned long long *)&dbg_lo, (unsigned long long *)&dbg_hi); } }
             uint64_t va = L->code[r].start + (uint64_t)i * 4;
             bool skip_dbg = dbg == 1 || (dbg == 2 && !(va >= dbg_lo && va < dbg_hi));
+            /* Raw Android process-clone leaf. iOS cannot create its child process.
+             * Return the Linux syscall error before touching bionic pthread internals. */
+            static const uint32_t process_clone[] = {
+                0xd53bd040, 0xf9400400, 0xb900141f, 0xd2882220, 0xaa1f03e1,
+                0xaa1f03e2, 0xaa1f03e3, 0xaa1f03e4, 0xd2801b88, 0xd4000001, 0xd65f03c0
+            };
+            if (!is_data && nwords - i >= sizeof(process_clone) / sizeof(*w) &&
+                !memcmp(w + i, process_clone, sizeof(process_clone))) {
+                w[i] = 0x928004a0; /* mov x0, #-38 (ENOSYS) */
+                w[i + 1] = 0xd65f03c0; /* ret */
+                continue;
+            }
             int xr = (is_data || skip_dbg) ? X18_NONE : x18_rewrite(L, &w[i], pc);
             if (is_data && x18_rewrite_would_apply(insn)) {
                 L->n_x18_data++;

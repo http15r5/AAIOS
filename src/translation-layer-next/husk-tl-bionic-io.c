@@ -1531,10 +1531,16 @@ static void *b_mmap(void *addr, size_t len, int prot, int flags, int fd, long of
         errno = ENOMEM;
         refuse = true;
     }
+    /* Bedrock trims the returned mapping itself. A fictional 8 GiB extent
+     * can cover unrelated allocations after the trim. Give it the full mapping
+     * or ENOMEM so it can retry, releasing the unused early reservation first. */
+    bool bedrock_reservation = prot == 0 && (flags & 0x20) && !(flags & 0x10) &&
+        compressed_heap_request(len) && tl_ld_find_lib("libminecraftpe.so");
+    if (bedrock_reservation) husk_release_unused_compressed_heap();
     void *r = refuse || (force_phantom && compressed_heap_request(len) && prot == 0 && (flags & 0x20) && !(flags & 0x10)) ? MAP_FAILED
             : shifted ? shifted_file_map(addr, len, prot_filter(prot, "mmap"), df, fd, off)
             : mmap(addr, len, prot_filter(prot, "mmap"), df, (flags & 0x20) ? -1 : fd, off);
-    if (r == MAP_FAILED && (errno == ENOMEM || force_phantom) && prot == 0 && (flags & 0x20) && !(flags & 0x10)) { r = phantom_reserve(len); if (r != MAP_FAILED) errno = 0; }
+    if (!bedrock_reservation && r == MAP_FAILED && (errno == ENOMEM || force_phantom) && prot == 0 && (flags & 0x20) && !(flags & 0x10)) { r = phantom_reserve(len); if (r != MAP_FAILED) errno = 0; }
     TL_ERRNO_END();
     /* a file mapped executable (libffi's trampolines: its own library's code page, or a temporary file holding a copy): a phone
        can not make file pages executable, and a library's file offsets are not where the loader put its code, so the mapping
