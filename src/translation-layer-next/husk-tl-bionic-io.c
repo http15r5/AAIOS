@@ -9,9 +9,7 @@
  */
 #define _DARWIN_C_SOURCE
 #include "husk-tl-bionic.h"
-const char *tl_ld_main_apk(void);
-bool tl_ld_aot_contains(const void *addr);
-bool tl_ld_covers(const void *addr, size_t bytes);
+#include "husk-tl-ld.h"
 #include "husk-tl-internal.h"
 #include "husk-tl-codewrite.h"
 #include "husk-tl-xmem.h"
