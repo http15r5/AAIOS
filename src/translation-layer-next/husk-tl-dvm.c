@@ -1063,6 +1063,16 @@ bool dvm_call(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
     return ok;
 }
 
+/* Large interpreter register files live outside the native stack. Keep them
+ * visible to the collector across nested calls and blocking native methods. */
+typedef struct heap_frame {
+    struct heap_frame *prev, *next;
+    size_t count;
+    uint64_t regs[];
+} heap_frame;
+static heap_frame *g_heap_frames;
+static pthread_mutex_t g_frame_lock = PTHREAD_MUTEX_INITIALIZER;
+
 static bool dvm_call_inner(dvm_method *m, jobj *self, const jvalue *params, jvalue *ret)
 {
     if (ret) ret->j = 0;
@@ -1073,9 +1083,20 @@ static bool dvm_call_inner(dvm_method *m, jobj *self, const jvalue *params, jval
         if (m->flags & 0x100) return call_native(m, self, params, ret);
         return dvm_throw("java/lang/AbstractMethodError", "%s.%s%s", m->cls->name, m->name, m->sig);
     }
-    uint64_t small[16];
-    uint64_t *regs = m->regs <= 16 ? small : calloc(m->regs, sizeof(uint64_t));
-    if (regs == small) memset(small, 0, sizeof(uint64_t) * m->regs);
+    uint64_t small[16] = {0};
+    uint64_t *regs = small;
+    heap_frame *frame = NULL;
+    if (m->regs > 16) {
+        frame = calloc(1, sizeof(*frame) + m->regs * sizeof(*regs));
+        if (!frame) return dvm_throw("java/lang/OutOfMemoryError", "interpreter register file");
+        frame->count = m->regs;
+        regs = frame->regs;
+        pthread_mutex_lock(&g_frame_lock);
+        frame->next = g_heap_frames;
+        if (frame->next) frame->next->prev = frame;
+        g_heap_frames = frame;
+        pthread_mutex_unlock(&g_frame_lock);
+    }
     int r = m->regs - m->ins;
     if (!(m->flags & 8)) regs[r++] = (uint64_t)(uintptr_t)self;
     for (int i = 0; i < m->nparams; i++) {
@@ -1092,7 +1113,14 @@ static bool dvm_call_inner(dvm_method *m, jobj *self, const jvalue *params, jval
         }
     }
     bool ok = interpret(m, regs, ret);
-    if (regs != small) free(regs);
+    if (frame) {
+        pthread_mutex_lock(&g_frame_lock);
+        if (frame->prev) frame->prev->next = frame->next;
+        else g_heap_frames = frame->next;
+        if (frame->next) frame->next->prev = frame->prev;
+        pthread_mutex_unlock(&g_frame_lock);
+        free(frame);
+    }
     return ok;
 }
 
@@ -2297,6 +2325,10 @@ static void dvm_gc_visit_class(tl_jclass *jc)
 
 static void dvm_gc_walk_roots(void (*visit)(jobj *))
 {
+    pthread_mutex_lock(&g_frame_lock);
+    for (heap_frame *f = g_heap_frames; f; f = f->next)
+        for (size_t i = 0; i < f->count; i++) visit((jobj *)(uintptr_t)f->regs[i]);
+    pthread_mutex_unlock(&g_frame_lock);
     g_gc_visit = visit;
     for (int i = 0; i < g_ndex; i++) {
         dvm_dex *d = g_dex[i];

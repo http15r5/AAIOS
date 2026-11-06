@@ -404,7 +404,30 @@ typedef struct aa_stream {
     bool thread_started;
 } aa_stream;
 
-static int b_AAudio_createStreamBuilder(void **builder) { aa_builder *b = calloc(1, sizeof(*b)); *builder = b; return b ? AA_OK : AA_UNAVAILABLE; }
+static bool use_bedrock_audio_fallback(void)
+{
+    if (!tl_ld_has_lib("libminecraftpe.so")) return false;
+    for (int i = 0; ; i++) {
+        const tl_zip *apk = tl_ld_apk_at(i);
+        if (!apk) return false;
+        const tl_zip_entry *fmod = tl_zip_find(apk, "lib/arm64-v8a/libfmod.so");
+        if (fmod) return fmod->usize == 1179776 && fmod->crc32 == 0x27d200c4u;
+    }
+}
+
+static int b_AAudio_createStreamBuilder(void **builder)
+{
+    if (!builder) return AA_UNAVAILABLE;
+    *builder = NULL;
+    /* This FMOD calls through the table even when dlopen fails, but explicitly
+     * checks the builder result at +0xe8238 before accessing the stream. */
+    if (use_bedrock_audio_fallback()) {
+        tl_log_line("aaudio: reporting unavailable to Bedrock FMOD at builder creation");
+        return AA_UNAVAILABLE;
+    }
+    *builder = calloc(1, sizeof(aa_builder));
+    return *builder ? AA_OK : AA_UNAVAILABLE;
+}
 static int b_AAudioStreamBuilder_delete(aa_builder *b) { free(b); return AA_OK; }
 static void b_AAudioStreamBuilder_setDataCallback(aa_builder *b, aa_data_cb cb, void *user) { b->cb = cb; b->user = user; }
 static void b_AAudioStreamBuilder_setDirection(aa_builder *b, int d) { b->direction = d; }

@@ -122,6 +122,7 @@ void tl_gc_register_thread(void)
 static pthread_mutex_t g_cand_mu = PTHREAD_MUTEX_INITIALIZER;
 static jobj *g_candidates;
 static _Atomic uint64_t g_candidate_adds;
+static _Atomic size_t g_pending_doom;
 
 void tl_gc_queue_candidate(jobj *o)
 {
@@ -342,7 +343,7 @@ static void free_object_internals(jobj *o)
 }
 
 /* The registry never loses live objects: sweep unlinks only what it frees. */
-static size_t sweep(uint32_t epoch, size_t *kept)
+static size_t sweep(uint32_t epoch, size_t *kept, size_t *pending)
 {
     pthread_mutex_lock(&g_cand_mu);
     size_t freed = 0;
@@ -359,6 +360,7 @@ static size_t sweep(uint32_t epoch, size_t *kept)
         } else if (o->gc_epoch >= epoch) {              /* born this round: too young to judge */
             (*kept)++;
         } else if (!o->gc_doom) {                       /* first miss: doomed, released only if still missing next round */
+            (*pending)++;
             o->gc_doom = 1;
             o->gc_epoch = epoch;
             (*kept)++;
@@ -391,6 +393,7 @@ void tl_gc_collect_now(const char *why)
     int expected = 0;
     if (!tl_dvm || !atomic_compare_exchange_strong(&g_collecting, &expected, 1)) return;
 
+    atomic_exchange(&g_candidate_adds, 0);
     uint64_t t0 = now_ms();
     atomic_store(&g_words_scanned, 0);
     uint32_t epoch = atomic_fetch_add(&g_epoch, 1) + 1;
@@ -428,14 +431,17 @@ void tl_gc_collect_now(const char *why)
 
     if (!w.oom) mark_from_roots(&w);
 
-    size_t freed = 0, kept = 0;
+    size_t freed = 0, kept = 0, pending = 0;
     if (w.oom) {
         /* An incomplete traversal must leave no marks for the next pass. */
         if (w.registered) for (size_t i = 0; i < w.slots; i++)
             if (w.registered[i]) w.registered[i]->gc_mark = 0;
         tl_log_line("gc: %s: incomplete mark pass, skipping sweep", why);
     }
-    else freed = sweep(epoch, &kept);
+    else {
+        freed = sweep(epoch, &kept, &pending);
+        atomic_store(&g_pending_doom, pending);
+    }
     free(w.registered);
     free(w.v);
     g_mark = NULL;
@@ -445,10 +451,9 @@ void tl_gc_collect_now(const char *why)
     pthread_cond_broadcast(&g_gate_cv);
     pthread_mutex_unlock(&g_gate_mu);
 
-    atomic_store(&g_candidate_adds, 0);
     atomic_store(&g_collecting, 0);
-    tl_log_line("gc: %s: freed %zu objects, %zu alive, %llu words scanned, %llu ms",
-                why, freed, kept, (unsigned long long)atomic_load(&g_words_scanned), (unsigned long long)(now_ms() - t0));
+    tl_log_line("gc: %s: freed %zu objects, %zu retained (%zu awaiting second pass), %llu words scanned, %llu ms",
+                why, freed, kept, pending, (unsigned long long)atomic_load(&g_words_scanned), (unsigned long long)(now_ms() - t0));
 }
 
 /* the heartbeat's trigger: collect when the phone reports little memory left and churn keeps coming */
@@ -464,11 +469,16 @@ void tl_gc_maybe(size_t avail_bytes)
         }
     }
     if (atomic_load(&g_disabled) || !tl_dvm) return;
-    if (!avail_bytes || avail_bytes > k_trigger_bytes) return;
+    uint64_t adds = atomic_load(&g_candidate_adds);
+    bool followup = atomic_load(&g_pending_doom) != 0;
+    if (!avail_bytes || avail_bytes > (1800ull << 20)) return;
+    if (avail_bytes > k_trigger_bytes && !followup && adds < 500000) return;
     uint64_t now = now_ms();
     uint64_t last = atomic_load(&g_last_gc_ms);
-    if (now - last < 25 * 1000) return;
-    if (atomic_load(&g_candidate_adds) < 20000 && now - last < 90 * 1000) return;
+    /* The first miss never frees an object. Revisit it while the phone still
+     * has room for the registry snapshot, even if allocation has stopped. */
+    uint64_t interval = followup ? 2000 : adds >= 20000 ? 5000 : 25000;
+    if (last && now - last < interval) return;
     atomic_store(&g_last_gc_ms, now);
     tl_gc_collect_now("memory pressure");
 }

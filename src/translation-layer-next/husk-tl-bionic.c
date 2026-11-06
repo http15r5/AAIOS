@@ -24,7 +24,6 @@
 #include <unistd.h>
 
 #include "husk-tl-ld.h"
-#include "husk-tl-internal.h"
 #include "husk-tl-va.h"
 
 /* ------------------------------------------------------------------ errno */
@@ -718,29 +717,11 @@ static void *tl_bionic_get_dummy_handle(const char *name)
     return &g_dummy_handles[0];
 }
 
-/* Bedrock 1.26.52.3's FMOD crashes while dispatching AAudioStream_getState.
- * Fail its optional AAudio probe so FMOD can select its bundled fallback. */
-static bool use_bedrock_audio_fallback(void)
-{
-    if (!tl_ld_has_lib("libminecraftpe.so")) return false;
-    for (int i = 0; ; i++) {
-        const tl_zip *apk = tl_ld_apk_at(i);
-        if (!apk) return false;
-        const tl_zip_entry *fmod = tl_zip_find(apk, "lib/arm64-v8a/libfmod.so");
-        if (fmod) return fmod->usize == 1179776 && fmod->crc32 == 0x27d200c4u;
-    }
-}
-
 static void *dlopen_impl(const char *path, int flags)
 {
     if (!path) return &g_sys_handle[0];          /* the global namespace */
     const char *base = strrchr(path, '/');
     base = base ? base + 1 : path;
-    if (!strcmp(base, "libaaudio.so") && use_bedrock_audio_fallback()) {
-        tl_log_line("audio: Bedrock FMOD 1.26.52.3: using fallback output");
-        dl_fail("dlopen failed: library \"%s\" unavailable", path);
-        return NULL;
-    }
     /* RTLD_NOLOAD (bionic: 4): only one already loaded. Geode finds the game this way. */
     if (flags & 4) {
         tl_lib *L = tl_ld_find_lib(base);
